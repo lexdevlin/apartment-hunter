@@ -1,0 +1,16 @@
+pandas
+openpyxl
+plotly
+msal
+requests
+python-dotenv
+# apartment hunter
+playwright
+beautifulsoup4
+lxml
+pyyaml
+azure-storage-blob
+pdfplumber
+supabase
+curl_cffi
+streamlit

@@ -1,0 +1,129 @@
+# ============================================================
+# Apartment Hunter — Search Configuration
+# ============================================================
+# Edit this file to change your search criteria.
+# All changes take effect on the next scraper run.
+
+search:
+  min_bedrooms: 2
+  max_price: 3400
+
+  # StreetEasy / Craigslist / Apartments.com neighborhood slugs.
+  # StreetEasy slugs are kebab-case (e.g. "bedford-stuyvesant").
+  # The scraper will match these against listing neighborhoods
+  # using case-insensitive fuzzy matching, so spacing/casing here
+  # doesn't have to be perfect — but be specific to avoid false matches.
+  neighborhoods:
+    - bushwick
+    - ridgewood
+    - bedford-stuyvesant
+    - clinton-hill
+    - prospect-lefferts-gardens
+    - williamsburg
+    - greenpoint
+    - east-williamsburg
+    - crown-heights
+
+# ============================================================
+# Priority Scoring
+# ============================================================
+# Listings are scored 0–100. Fields with no data are excluded
+# from both numerator and denominator, so the score reflects
+# only what is known. Listings at or above the threshold are
+# flagged as is_priority.
+#
+# Total possible points (all fields known): 100
+#   price(24) + floor(7) + subway(13) + neighborhood(13)
+#   + bedrooms(5) + bathrooms(3) + dishwasher(10)
+#   + washer_dryer(10) + rent_stabilized(15) = 100
+
+priority_scoring:
+  threshold: 65
+
+  price:
+    max_points: 24
+    max_price: 3300   # $3300 and above = 0 pts
+    min_price: 2800   # $2800 and below = max pts (linear between)
+
+  floor:
+    points_2nd:      3
+    points_3rd_plus: 7
+
+  subway:
+    points_medium: 8    # any line ≤ 5 min walk
+    points_high:   13   # any line ≤ 3 min, OR two lines summing ≤ 11 min
+
+  neighborhood:
+    high_points:   13
+    medium_points:  8
+    low_points:     3
+    high:
+      - bushwick
+      - ridgewood
+      - williamsburg
+      - east-williamsburg
+    medium:
+      - bedford-stuyvesant
+      - crown-heights
+      - clinton-hill
+      - prospect-lefferts-gardens
+      - greenpoint
+
+  bedrooms:
+    points_2:      3
+    points_3_plus: 5
+
+  bathrooms:
+    points_gt1: 3
+
+  # Fixed amenity bonuses
+  dishwasher:      10
+  washer_dryer:    10
+  rent_stabilized: 15
+
+# ============================================================
+# Priority Addresses & Intersections
+# ============================================================
+# Listings matching any of these are immediately flagged is_priority=True
+# with priority_score=100, bypassing the normal scoring system.
+#
+# priority_addresses: substring match against the listing's address field.
+#   A partial street name is fine — e.g. "Myrtle Ave" matches any number on that street.
+#
+# priority_intersections: both street names must appear anywhere in the listing's
+#   address or title. Useful for cross-street listings from Craigslist where
+#   no house number is given (e.g. "69th Ave near Onderdonk Ave" in Ridgewood).
+#   Use enough of the name to be unambiguous; abbreviations like "Ave" will
+#   also match "Avenue" as long as the pattern appears in the text.
+priority_addresses:
+  # - "123 Example St"
+  # - "456 Another Ave"
+
+priority_intersections:
+  - ["69th Avenue", "Onderdonk Avenue"]  # Ridgewood corner
+
+# ============================================================
+# Sources  (set to false to disable a source)
+# ============================================================
+sources:
+  streeteasy: true
+  craigslist: true
+  zillow: true
+  apartments_com: false
+
+# ============================================================
+# OneDrive — Apartment Listings Excel file
+# ============================================================
+# Path to the Excel file within your OneDrive (relative to root).
+# The scraper will create this file on first run if it doesn't exist.
+# Set via env var APARTMENT_ONEDRIVE_FILE_PATH, or hardcode below.
+onedrive:
+  file_path: "Data Analytics/Apartment Hunter/Apartment Listings.xlsx"
+  sheet_name: "Listings"
+
+# ============================================================
+# Azure Blob — Dashboard hosting
+# ============================================================
+azure:
+  container: "$web"
+  blob_name: "apartment_dashboard.html"

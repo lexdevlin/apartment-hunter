@@ -1,0 +1,54 @@
+name: Apartment Hunter
+
+on:
+  schedule:
+    # Runs every 6 hours: 6am, 12pm, 6pm, midnight UTC
+    # Adjust to your timezone: EST = UTC-5, so 12pm UTC = 7am EST
+    - cron: '0 6,12,18,0 * * *'
+  workflow_dispatch:   # Manual trigger from GitHub Actions UI
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  scrape-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt azure-storage-blob
+
+      - name: Run scraper
+        env:
+          # Shared Azure AD app (same as personal log)
+          AZURE_CLIENT_ID:   ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID:   ${{ secrets.AZURE_TENANT_ID }}
+
+          # OneDrive token — needs Files.ReadWrite scope.
+          # Generate with: python setup_onedrive_auth.py (update SCOPES first)
+          # Store as a SEPARATE secret from ONEDRIVE_REFRESH_TOKEN.
+          APARTMENT_ONEDRIVE_REFRESH_TOKEN: ${{ secrets.APARTMENT_ONEDRIVE_REFRESH_TOKEN }}
+
+          # Optional: override the file path from config.yaml
+          # APARTMENT_ONEDRIVE_FILE_PATH: "Documents/Apartment Listings.xlsx"
+
+          # Azure Blob Storage — same connection string as daily report
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+
+        run: python -m apartment_hunter.main
+
+      - name: Upload dashboard artifact (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apartment-dashboard
+          path: data/apartment_dashboard.html
+          retention-days: 3
