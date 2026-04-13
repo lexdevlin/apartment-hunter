@@ -14,8 +14,10 @@ Keys required:
 """
 
 import os
+import re
 from datetime import datetime
 
+import streamlit.components.v1 as _components
 import pandas as pd
 import requests as _requests
 import streamlit as st
@@ -208,6 +210,111 @@ st.markdown(f"**Showing {len(filtered)} listing(s)**")
 st.divider()
 
 # ---------------------------------------------------------------------------
+# Image carousel
+# ---------------------------------------------------------------------------
+
+def _image_carousel(images: list[str], key: str) -> None:
+    """Render a horizontally-scrollable carousel showing 3 images at a time."""
+    if not images:
+        _components.html(
+            '<div style="background:#1e1e1e;height:180px;border-radius:6px;'
+            'display:flex;align-items:center;justify-content:center;'
+            'color:#555;font-size:0.78rem">No image</div>',
+            height=190,
+        )
+        return
+
+    imgs_json = str(images).replace("'", '"')
+    _components.html(f"""
+<style>
+  .carousel-wrap {{
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    user-select: none;
+  }}
+  .carousel-track {{
+    display: flex;
+    gap: 6px;
+    transition: transform 0.3s ease;
+  }}
+  .carousel-track img {{
+    flex: 0 0 calc((100% - 12px) / 3);
+    width: calc((100% - 12px) / 3);
+    height: 180px;
+    object-fit: cover;
+    border-radius: 6px;
+    cursor: pointer;
+  }}
+  .carousel-btn {{
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 18px;
+    line-height: 30px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 10;
+    padding: 0;
+  }}
+  .carousel-btn:hover {{ background: rgba(0,0,0,0.8); }}
+  .carousel-btn.prev {{ left: 4px; }}
+  .carousel-btn.next {{ right: 4px; }}
+  .carousel-counter {{
+    text-align: center;
+    font-size: 0.72rem;
+    color: #888;
+    margin-top: 4px;
+  }}
+</style>
+<div class="carousel-wrap" id="cw-{key}">
+  <button class="carousel-btn prev" onclick="move_{key}(-1)">&#8249;</button>
+  <div class="carousel-track" id="ct-{key}"></div>
+  <button class="carousel-btn next" onclick="move_{key}(1)">&#8250;</button>
+</div>
+<div class="carousel-counter" id="cc-{key}"></div>
+<script>
+(function() {{
+  const imgs = {imgs_json};
+  const track = document.getElementById('ct-{key}');
+  const counter = document.getElementById('cc-{key}');
+  let idx = 0;
+  const visible = 3;
+
+  imgs.forEach(function(src) {{
+    const img = document.createElement('img');
+    img.src = src;
+    img.onclick = function() {{ window.open(src, '_blank'); }};
+    track.appendChild(img);
+  }});
+
+  function render() {{
+    const pct = idx * (100 / visible + 2);
+    track.style.transform = 'translateX(-' + (idx * (100 + 2) / visible) + '%)';
+    const end = Math.min(idx + visible, imgs.length);
+    counter.textContent = imgs.length > visible
+      ? (idx + 1) + '–' + end + ' of ' + imgs.length + ' photos'
+      : imgs.length + ' photo' + (imgs.length > 1 ? 's' : '');
+  }}
+
+  window['move_{key}'] = function(dir) {{
+    idx = Math.max(0, Math.min(idx + dir, imgs.length - visible));
+    render();
+  }};
+
+  render();
+}})();
+</script>
+""", height=220)
+
+
+# ---------------------------------------------------------------------------
 # Listing cards
 # ---------------------------------------------------------------------------
 
@@ -254,23 +361,9 @@ else:
                     unsafe_allow_html=True,
                 )
 
-            # ── Image carousel (up to 3 at a time) ──────────────────────────
+            # ── Image carousel ───────────────────────────────────────────────
             images = [u.strip() for u in (image_url or "").split(",") if u.strip()]
-            if images:
-                shown = images[:3]
-                img_cols = st.columns(len(shown))
-                for col, img_src in zip(img_cols, shown):
-                    with col:
-                        st.image(img_src, use_container_width=True)
-                if len(images) > 3:
-                    st.caption(f"+{len(images) - 3} more photo(s) available on the listing page")
-            else:
-                st.markdown(
-                    '<div style="background:#1e1e1e;height:100px;border-radius:6px;'
-                    'display:flex;align-items:center;justify-content:center;'
-                    'color:#555;font-size:0.78rem;margin-bottom:0.5rem">No image</div>',
-                    unsafe_allow_html=True,
-                )
+            _image_carousel(images, key=listing.get("listing_id") or url[-12:])
 
             # ── Details ──────────────────────────────────────────────────────
             detail_line = _fmt_beds_baths_floor(beds, baths, floor_)
@@ -297,9 +390,11 @@ else:
             # ── Map ──────────────────────────────────────────────────────────
             with st.expander("📍 Map"):
                 _loc = listing.get("address") or ""
+                # Strip unit designator — Nominatim can't resolve sub-building addresses
+                _loc = re.sub(r"\s*#\w+$", "", _loc).strip()
                 _fallback = hood or ""
                 if _loc:
-                    _q = _loc if ("brooklyn" in _loc.lower() or "ny" in _loc.lower()) \
+                    _q = _loc if re.search(r"\bNY\b|\bBrooklyn\b", _loc, re.IGNORECASE) \
                         else f"{_loc}, Brooklyn, NY"
                 elif _fallback:
                     _q = f"{_fallback}, Brooklyn, NY"

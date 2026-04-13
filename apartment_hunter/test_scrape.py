@@ -462,13 +462,36 @@ def main():
         with open(CONFIG_PATH, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        source_filter = args.source or "streeteasy"
-        if source_filter != "streeteasy":
-            print(f"--enrich-only only supports StreetEasy (got --source {source_filter})")
-            return
-
         import pandas as pd
         from apartment_hunter import onedrive as _onedrive
+
+        # Sources that have a dedicated detail-page enrichment step.
+        # Each entry: (headers_dict, enrich_fn, restore_fn, detail_delay, session_rotate_every)
+        _ENRICH_SOURCES = {
+            "streeteasy": (
+                streeteasy.HEADERS,
+                streeteasy._enrich_listing,
+                streeteasy._restore_from_row,
+                streeteasy.DETAIL_DELAY,
+                10,
+            ),
+            "craigslist": (
+                craigslist.DETAIL_HEADERS,
+                craigslist._enrich_listing,
+                craigslist._restore_from_row_cl,
+                craigslist.DETAIL_DELAY,
+                20,
+            ),
+        }
+
+        sources_to_run = (
+            [args.source] if args.source else list(_ENRICH_SOURCES.keys())
+        )
+        unknown = [s for s in sources_to_run if s not in _ENRICH_SOURCES]
+        if unknown:
+            print(f"--enrich-only not supported for: {', '.join(unknown)}")
+            print(f"  Supported: {', '.join(_ENRICH_SOURCES)}")
+            return
 
         print(f"\n{'='*50}")
         print("OneDrive download")
@@ -478,73 +501,87 @@ def main():
             print("No listings found on OneDrive.")
             return
 
-        # Work with dict rows so the enrichment logic stays unchanged
         rows = {r["url"]: r for r in df.to_dict("records") if r.get("url")}
-
-        to_enrich = [
-            row for row in rows.values()
-            if row.get("source") == "streeteasy"
-            and str(row.get("delisted") or "").lower() != "true"
-        ]
-        if args.limit:
-            to_enrich = to_enrich[: args.limit]
-
         print(f"Loaded {len(rows)} row(s) from OneDrive")
-        print(f"Re-enriching {len(to_enrich)} StreetEasy listing(s)"
-              + (f"  [limit={args.limit}]" if args.limit else "") + "...")
 
-        session = requests.Session(impersonate="chrome136")
-        session.headers.update(streeteasy.HEADERS)
+        n_delisted_total = 0
+        n_updated_total  = 0
+        n_checked_total  = 0
 
-        n_delisted = 0
-        n_updated  = 0
-        for i, row in enumerate(to_enrich):
-            if i > 0 and i % 10 == 0:
-                session = requests.Session(impersonate="chrome136")
-                session.headers.update(streeteasy.HEADERS)
-                time.sleep(streeteasy.REQUEST_DELAY + random.uniform(1, 3))
+        for source_name in sources_to_run:
+            headers, enrich_fn, restore_fn, detail_delay, rotate_every = \
+                _ENRICH_SOURCES[source_name]
 
-            url     = row.get("url", "")
-            listing = Listing(url=url, source="streeteasy", title=row.get("title", ""))
-            streeteasy._restore_from_row(listing, row)
-            enriched = streeteasy._enrich_listing(session, listing)
+            to_enrich = [
+                row for row in rows.values()
+                if row.get("source") == source_name
+                and str(row.get("delisted") or "").lower() != "true"
+            ]
+            if args.limit:
+                to_enrich = to_enrich[: args.limit]
 
-            changed = False
+            print(f"\n{'='*50}")
+            print(f"Re-enriching: {source_name}  ({len(to_enrich)} listing(s)"
+                  + (f"  limit={args.limit}" if args.limit else "") + ")")
+            print(f"{'='*50}")
 
-            if enriched.delisted:
-                row["delisted"] = "True"
-                n_delisted += 1
-                changed = True
-                print(f"  [delisted] {url[:80]}")
+            session = requests.Session(impersonate="chrome136")
+            session.headers.update(headers)
 
-            # Fill blank fields; never downgrade booleans already set to True
-            def _patch(field: str, val) -> None:
-                nonlocal changed
-                if val is None:
-                    return
-                existing = str(row.get(field) or "").strip()
-                if existing.lower() == "true":
-                    return  # never downgrade a confirmed True
-                if existing:
-                    return  # already populated
-                row[field] = val if isinstance(val, str) else str(val)
-                changed = True
+            n_delisted = 0
+            n_updated  = 0
 
-            _patch("address",        enriched.address)
-            _patch("floor",          enriched.floor)
-            _patch("bedrooms",       enriched.bedrooms)
-            _patch("bathrooms",      enriched.bathrooms)
-            _patch("date_listed",    enriched.date_listed.strftime("%Y-%m-%d") if enriched.date_listed else None)
-            _patch("dishwasher",     "True" if enriched.dishwasher else None)
-            _patch("washer_dryer",   "True" if enriched.washer_dryer else None)
-            _patch("rent_stabilized","True" if enriched.rent_stabilized else None)
-            _patch("image_url",      enriched.image_url)
-            _patch("title",          enriched.title)
+            for i, row in enumerate(to_enrich):
+                if i > 0 and i % rotate_every == 0:
+                    session = requests.Session(impersonate="chrome136")
+                    session.headers.update(headers)
+                    time.sleep(detail_delay + random.uniform(2, 4))
 
-            if changed and not enriched.delisted:
-                n_updated += 1
+                url     = row.get("url", "")
+                listing = Listing(url=url, source=source_name, title=row.get("title", ""))
+                restore_fn(listing, row)
+                enriched = enrich_fn(session, listing)
 
-            time.sleep(streeteasy.DETAIL_DELAY + random.uniform(0, 1.5))
+                changed = False
+
+                if enriched.delisted:
+                    row["delisted"] = "True"
+                    n_delisted += 1
+                    changed = True
+                    print(f"  [delisted] {url[:80]}")
+
+                def _patch(field: str, val) -> None:
+                    nonlocal changed
+                    if val is None:
+                        return
+                    existing = str(row.get(field) or "").strip()
+                    if existing.lower() == "true":
+                        return
+                    if existing:
+                        return
+                    row[field] = val if isinstance(val, str) else str(val)
+                    changed = True
+
+                _patch("address",         enriched.address)
+                _patch("floor",           enriched.floor)
+                _patch("bedrooms",        enriched.bedrooms)
+                _patch("bathrooms",       enriched.bathrooms)
+                _patch("date_listed",     enriched.date_listed.strftime("%Y-%m-%d") if enriched.date_listed else None)
+                _patch("dishwasher",      "True" if enriched.dishwasher else None)
+                _patch("washer_dryer",    "True" if enriched.washer_dryer else None)
+                _patch("rent_stabilized", "True" if enriched.rent_stabilized else None)
+                _patch("image_url",       enriched.image_url)
+                _patch("title",           enriched.title)
+
+                if changed and not enriched.delisted:
+                    n_updated += 1
+
+                time.sleep(detail_delay + random.uniform(0, 1.5))
+
+            print(f"  {n_delisted} newly delisted, {n_updated} field(s) updated")
+            n_delisted_total += n_delisted
+            n_updated_total  += n_updated
+            n_checked_total  += len(to_enrich)
 
         print(f"\n{'='*50}")
         print("OneDrive upload")
@@ -552,8 +589,8 @@ def main():
         updated_df = pd.DataFrame(list(rows.values()), columns=EXCEL_COLUMNS)
         _onedrive.upload_listings(config, updated_df)
 
-        print(f"\n  {n_delisted} newly delisted, {n_updated} field(s) updated  "
-              f"({len(to_enrich)} listing(s) checked)")
+        print(f"\nTotal: {n_delisted_total} newly delisted, {n_updated_total} field(s) updated  "
+              f"({n_checked_total} listing(s) checked across {len(sources_to_run)} source(s))")
         return
 
     t_start = time.perf_counter()

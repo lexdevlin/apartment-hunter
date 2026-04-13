@@ -435,19 +435,20 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     if listing.address is None:
         listing.address = _extract_cross_street(full_text)
 
-    # Images: collect all available image URLs (CL sets one og:image per photo)
+    # Images: CL only sets one og:image but embeds all full-size URLs in the
+    # thumbnail anchor hrefs inside #thumbs — these are always present in the
+    # static HTML and point directly to the _600x450.jpg full-size images.
     if not listing.image_url:
-        img_urls = [
-            m.get("content", "")
-            for m in soup.find_all("meta", property="og:image")
-            if m.get("content", "").startswith("http")
-        ]
-        if not img_urls:
-            # Fallback: full-size URLs from swiper <img> tags
-            img_urls = list(dict.fromkeys(
-                img["src"] for img in soup.find_all("img", src=re.compile(r"images\.craigslist\.org"))
-                if img.get("src")
-            ))
+        thumbs_div = soup.find("div", id="thumbs")
+        if thumbs_div:
+            img_urls = [
+                a["href"] for a in thumbs_div.find_all("a", class_="thumb")
+                if a.get("href", "").startswith("http")
+            ]
+        else:
+            # Fallback: single og:image
+            og = soup.find("meta", property="og:image")
+            img_urls = [og["content"]] if og and og.get("content", "").startswith("http") else []
         if img_urls:
             listing.image_url = ",".join(img_urls[:8])
 
