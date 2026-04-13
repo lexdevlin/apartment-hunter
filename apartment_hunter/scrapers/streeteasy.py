@@ -472,7 +472,10 @@ def _restore_from_row(listing: Listing, row: dict) -> None:
     if listing.rent_stabilized is None:
         listing.rent_stabilized = _bool(row.get("rent_stabilized"))
     if listing.image_url is None:
-        listing.image_url = row.get("image_url") or None
+        _img = row.get("image_url")
+        if _img is not None and not (isinstance(_img, float) and _img != _img):
+            _img = str(_img).strip()
+            listing.image_url = _img if _img.lower() not in ("nan", "none", "") else None
 
 
 def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:

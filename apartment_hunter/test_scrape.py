@@ -363,6 +363,8 @@ def main():
     parser.add_argument("--enrich-only", action="store_true",
                         help="Skip scraping; re-fetch StreetEasy detail pages to fill blank fields "
                              "and detect newly-delisted listings (writes results)")
+    parser.add_argument("--sync-only", action="store_true",
+                        help="Skip scraping; download current OneDrive data and sync to Supabase")
     args = parser.parse_args()
 
     if args.check_gone_only:
@@ -388,6 +390,34 @@ def main():
             time.sleep(random.uniform(1.0, 2.5))
         print(f"\n{'='*50}")
         print(f"Would flag {gone_count} of {len(to_check)} checked listing(s) as delisted.")
+        return
+
+    if args.sync_only:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+
+        import pandas as pd
+        from apartment_hunter import onedrive as _onedrive, supabase_upsert
+
+        print(f"\n{'='*50}")
+        print("OneDrive download")
+        print(f"{'='*50}")
+        df = _onedrive.download_listings(config)
+        if df.empty:
+            print("No listings found on OneDrive.")
+            return
+        print(f"  {len(df)} row(s) loaded")
+
+        print(f"\n{'='*50}")
+        print("Supabase sync")
+        print(f"{'='*50}")
+        if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
+            t_sb = time.perf_counter()
+            rows = df.to_dict("records")
+            n_synced = supabase_upsert.upsert_listings(rows)
+            print(f"  {n_synced} row(s) synced  [{_elapsed(t_sb)}]")
+        else:
+            print("  SUPABASE_URL / SUPABASE_KEY not set — skipping.")
         return
 
     if args.rent_stabilized_only:
@@ -570,7 +600,13 @@ def main():
                 _patch("dishwasher",      "True" if enriched.dishwasher else None)
                 _patch("washer_dryer",    "True" if enriched.washer_dryer else None)
                 _patch("rent_stabilized", "True" if enriched.rent_stabilized else None)
-                _patch("image_url",       enriched.image_url)
+                # image_url: always overwrite — enrichment now collects multiple
+                # images as a comma-separated list, which supersedes any single
+                # URL stored from a previous run.
+                if enriched.image_url:
+                    if enriched.image_url != row.get("image_url"):
+                        row["image_url"] = enriched.image_url
+                        changed = True
                 _patch("title",           enriched.title)
 
                 if changed and not enriched.delisted:
@@ -588,6 +624,20 @@ def main():
         print(f"{'='*50}")
         updated_df = pd.DataFrame(list(rows.values()), columns=EXCEL_COLUMNS)
         _onedrive.upload_listings(config, updated_df)
+
+        print(f"\n{'='*50}")
+        print("Supabase sync")
+        print(f"{'='*50}")
+        if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
+            try:
+                from apartment_hunter import supabase_upsert
+                t_sb = time.perf_counter()
+                n_synced = supabase_upsert.upsert_listings(list(rows.values()))
+                print(f"  {n_synced} row(s) synced  [{_elapsed(t_sb)}]")
+            except Exception as e:
+                print(f"  [Supabase] sync failed: {e}")
+        else:
+            print("  SUPABASE_URL / SUPABASE_KEY not set — skipping.")
 
         print(f"\nTotal: {n_delisted_total} newly delisted, {n_updated_total} field(s) updated  "
               f"({n_checked_total} listing(s) checked across {len(sources_to_run)} source(s))")

@@ -41,43 +41,63 @@ def _get_client() -> Client:
 # Type coercion: CSV rows are all strings; Supabase needs proper types
 # ---------------------------------------------------------------------------
 
-def _bool(v) -> Optional[bool]:
-    if v is None:
+def _is_nan(v) -> bool:
+    """True for float NaN — pandas uses these for missing cells in DataFrames."""
+    try:
+        return v is not None and float(v) != float(v)  # NaN != NaN
+    except (TypeError, ValueError):
+        return False
+
+
+def _clean(v):
+    """Normalise a value: turn NaN / 'nan' / 'None' / '' into None."""
+    if v is None or _is_nan(v):
         return None
-    s = str(v).strip().lower()
-    if s in ("true", "1", "yes"):
+    s = str(v).strip()
+    if s.lower() in ("nan", "none", ""):
+        return None
+    return s
+
+
+def _bool(v) -> Optional[bool]:
+    s = _clean(v)
+    if s is None:
+        return None
+    if s.lower() in ("true", "1", "yes"):
         return True
-    if s in ("false", "0", "no"):
+    if s.lower() in ("false", "0", "no"):
         return False
     return None
 
 
 def _int(v) -> Optional[int]:
-    if v is None or str(v).strip() == "":
+    s = _clean(v)
+    if s is None:
         return None
     # Strip currency formatting: "$2,800/mo" → 2800
-    s = re.sub(r"[^\d]", "", str(v).split("/")[0])
-    return int(s) if s else None
+    digits = re.sub(r"[^\d]", "", s.split("/")[0])
+    return int(digits) if digits else None
 
 
 def _float(v) -> Optional[float]:
-    if v is None or str(v).strip() == "":
+    s = _clean(v)
+    if s is None:
         return None
     try:
-        return float(str(v).strip())
+        result = float(s)
+        # Guard against inf / -inf which are also non-JSON-compliant
+        return result if result == result and abs(result) != float("inf") else None
     except (ValueError, TypeError):
         return None
 
 
 def _str(v) -> Optional[str]:
-    s = str(v).strip() if v is not None else ""
-    return s or None
+    return _clean(v)
 
 
 def _date(v) -> Optional[str]:
     """Pass through date/datetime strings already normalised by the CSV pipeline."""
-    s = str(v).strip() if v is not None else ""
-    return s or None
+    return _clean(v)
 
 
 def _coerce(row: dict) -> dict:

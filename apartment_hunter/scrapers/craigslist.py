@@ -366,7 +366,13 @@ def _restore_from_row_cl(listing: Listing, row: dict) -> None:
     if listing.rent_stabilized is None:
         listing.rent_stabilized = _bool(row.get("rent_stabilized"))
     if listing.image_url is None:
-        listing.image_url = row.get("image_url") or None
+        _img = row.get("image_url")
+        # pandas uses float('nan') for empty cells — must exclude it explicitly
+        # since nan is truthy and would fool the 'if not listing.image_url' guard
+        # in _enrich_listing, causing image extraction to be skipped.
+        if _img is not None and not (isinstance(_img, float) and _img != _img):
+            _img = str(_img).strip()
+            listing.image_url = _img if _img.lower() not in ("nan", "none", "") else None
     # Restore title from CSV (detail page may have cleaned it up)
     stored_title = (row.get("title") or "").strip()
     if stored_title:
