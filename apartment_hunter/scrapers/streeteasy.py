@@ -498,6 +498,16 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     soup = BeautifulSoup(resp.text, "lxml")
     full_text = soup.get_text(" ", strip=True)
 
+    # --- Off-market detection ---
+    # StreetEasy shows an "Unavailable" badge with "Delisted on MM/DD/YYYY" or
+    # "Rented on MM/DD/YYYY" on the detail page of units no longer available.
+    # Mark these now so the upsert step can persist the flag rather than
+    # treating a re-sighted URL as proof the listing is still active.
+    _body = full_text.lower()
+    if any(p in _body for p in ("unavailable", "delisted", "rented on")):
+        listing.delisted = True
+        return listing
+
     # --- Address / unit from <h1> when URL parsing didn't produce them ---
     h1 = soup.find("h1")
     if h1:

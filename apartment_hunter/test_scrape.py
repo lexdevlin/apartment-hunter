@@ -12,6 +12,8 @@ Optional flags:
   --limit 20                  cap results per source (useful for quick checks)
   --subway-only               skip scraping; reload existing CSV and re-run subway proximity
   --rent-stabilized-only      skip scraping; reload existing CSV and re-run DHCR crosscheck
+  --enrich-only               skip scraping; re-fetch detail pages for existing StreetEasy rows
+                              to fill blank fields and detect newly-delisted listings
 """
 
 import argparse
@@ -112,10 +114,13 @@ _ALWAYS_UPDATE   = {"price", "last_seen", "priority_score"}
 # ---------------------------------------------------------------------------
 
 _GONE_PATTERNS: dict[str, list[str]] = {
-    # StreetEasy: delisted listings return 200 with "Delisted MM/DD/YYYY" in the HTML.
+    # StreetEasy: unavailable listings return 200 with an "Unavailable" badge and either
+    # "Delisted MM/DD/YYYY" or "Rented on MM/DD/YYYY" in the HTML.
     # Note: StreetEasy returns 403 on scraping sessions but 200 on direct permalink requests.
     "streeteasy": [
         "delisted",
+        "rented on",
+        "unavailable",
     ],
     # Craigslist: deleted posts return HTTP 410 (handled in _is_gone directly).
     # Text patterns cover the rare case where CL serves a 200 "deleted" page.
@@ -295,8 +300,10 @@ def _upsert_listings(existing: dict[str, dict], new_listings: list, columns: lis
             continue
 
         old_row = merged[url]
-        # If we see it again, it's clearly not gone — clear any prior flag
-        old_row["delisted"] = ""
+        # Preserve a delisted flag set by enrichment (off-market detail page);
+        # only clear it when the freshly-scraped listing is itself still live.
+        if str(new_row.get("delisted") or "").lower() != "true":
+            old_row["delisted"] = ""
         for col in columns:
             if col in _NEVER_OVERWRITE:
                 continue
@@ -353,6 +360,9 @@ def main():
                         help="Skip scraping; reload existing CSV and re-run DHCR crosscheck")
     parser.add_argument("--check-gone-only", action="store_true",
                         help="Skip scraping; check every existing CSV row for availability (verbose, no writes)")
+    parser.add_argument("--enrich-only", action="store_true",
+                        help="Skip scraping; re-fetch StreetEasy detail pages to fill blank fields "
+                             "and detect newly-delisted listings (writes results)")
     args = parser.parse_args()
 
     if args.check_gone_only:
@@ -446,6 +456,104 @@ def main():
             addr = l.address or "(no address)"
             sub  = l.nearest_subway or "(not enriched)"
             print(f"  {addr[:45]:<45}  {sub}")
+        return
+
+    if args.enrich_only:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+
+        source_filter = args.source or "streeteasy"
+        if source_filter != "streeteasy":
+            print(f"--enrich-only only supports StreetEasy (got --source {source_filter})")
+            return
+
+        import pandas as pd
+        from apartment_hunter import onedrive as _onedrive
+
+        print(f"\n{'='*50}")
+        print("OneDrive download")
+        print(f"{'='*50}")
+        df = _onedrive.download_listings(config)
+        if df.empty:
+            print("No listings found on OneDrive.")
+            return
+
+        # Work with dict rows so the enrichment logic stays unchanged
+        rows = {r["url"]: r for r in df.to_dict("records") if r.get("url")}
+
+        to_enrich = [
+            row for row in rows.values()
+            if row.get("source") == "streeteasy"
+            and str(row.get("delisted") or "").lower() != "true"
+        ]
+        if args.limit:
+            to_enrich = to_enrich[: args.limit]
+
+        print(f"Loaded {len(rows)} row(s) from OneDrive")
+        print(f"Re-enriching {len(to_enrich)} StreetEasy listing(s)"
+              + (f"  [limit={args.limit}]" if args.limit else "") + "...")
+
+        session = requests.Session(impersonate="chrome136")
+        session.headers.update(streeteasy.HEADERS)
+
+        n_delisted = 0
+        n_updated  = 0
+        for i, row in enumerate(to_enrich):
+            if i > 0 and i % 10 == 0:
+                session = requests.Session(impersonate="chrome136")
+                session.headers.update(streeteasy.HEADERS)
+                time.sleep(streeteasy.REQUEST_DELAY + random.uniform(1, 3))
+
+            url     = row.get("url", "")
+            listing = Listing(url=url, source="streeteasy", title=row.get("title", ""))
+            streeteasy._restore_from_row(listing, row)
+            enriched = streeteasy._enrich_listing(session, listing)
+
+            changed = False
+
+            if enriched.delisted:
+                row["delisted"] = "True"
+                n_delisted += 1
+                changed = True
+                print(f"  [delisted] {url[:80]}")
+
+            # Fill blank fields; never downgrade booleans already set to True
+            def _patch(field: str, val) -> None:
+                nonlocal changed
+                if val is None:
+                    return
+                existing = str(row.get(field) or "").strip()
+                if existing.lower() == "true":
+                    return  # never downgrade a confirmed True
+                if existing:
+                    return  # already populated
+                row[field] = val if isinstance(val, str) else str(val)
+                changed = True
+
+            _patch("address",        enriched.address)
+            _patch("floor",          enriched.floor)
+            _patch("bedrooms",       enriched.bedrooms)
+            _patch("bathrooms",      enriched.bathrooms)
+            _patch("date_listed",    enriched.date_listed.strftime("%Y-%m-%d") if enriched.date_listed else None)
+            _patch("dishwasher",     "True" if enriched.dishwasher else None)
+            _patch("washer_dryer",   "True" if enriched.washer_dryer else None)
+            _patch("rent_stabilized","True" if enriched.rent_stabilized else None)
+            _patch("image_url",      enriched.image_url)
+            _patch("title",          enriched.title)
+
+            if changed and not enriched.delisted:
+                n_updated += 1
+
+            time.sleep(streeteasy.DETAIL_DELAY + random.uniform(0, 1.5))
+
+        print(f"\n{'='*50}")
+        print("OneDrive upload")
+        print(f"{'='*50}")
+        updated_df = pd.DataFrame(list(rows.values()), columns=EXCEL_COLUMNS)
+        _onedrive.upload_listings(config, updated_df)
+
+        print(f"\n  {n_delisted} newly delisted, {n_updated} field(s) updated  "
+              f"({len(to_enrich)} listing(s) checked)")
         return
 
     t_start = time.perf_counter()

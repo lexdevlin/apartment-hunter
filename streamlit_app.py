@@ -45,7 +45,7 @@ def _get_client() -> Client:
 
 @st.cache_data(ttl=300)
 def load_listings() -> list[dict]:
-    result = _get_client().table("listings").select("*").eq("delisted", False).execute()
+    result = _get_client().table("listings").select("*").or_("delisted.is.null,delisted.eq.false").execute()
     data = result.data or []
     # Sort: priority first, then by score descending, then by date_found descending
     data.sort(key=lambda l: (

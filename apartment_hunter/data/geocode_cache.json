@@ -1733,5 +1733,33 @@
   "1114 Halsey Street|Bushwick": [
     40.6891554,
     -73.9115486
+  ],
+  "195 Wyckoff Avenue #3R|Bushwick": [
+    40.7027523,
+    -73.9163721
+  ],
+  "58-11 70 Avenue #1FL|Ridgewood": [
+    40.7010037,
+    -73.9013479
+  ],
+  "867 Lafayette Avenue #5|Bedford Stuyvesant": [
+    40.6916071,
+    -73.9379101
+  ],
+  "1002 Putnam Avenue #GARDEN|Bedford Stuyvesant": [
+    40.6857291,
+    -73.9352797
+  ],
+  "6 Radde Place #1|Bedford Stuyvesant": [
+    40.6774362,
+    -73.9148246
+  ],
+  "379 Hawthorne Street #3A|Prospect Lefferts Gardens": [
+    40.6582121,
+    -73.9478678
+  ],
+  "241 Rockaway Avenue #2R|Crown Heights": [
+    40.6743568,
+    -73.9108502
   ]
 }
