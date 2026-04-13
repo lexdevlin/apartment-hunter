@@ -582,21 +582,20 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     # --- Listing images ---
     # StreetEasy embeds photo URLs as JSON inside <script> tags (React/Next.js),
     # not as <img src> or og:image meta tags. Extract them directly from raw HTML.
-    if not listing.image_url:
-        # Full-size photos live on zillowstatic CDN, named <hash>-full.<ext>
-        photo_urls = re.findall(
-            r"https://photos\.zillowstatic\.com/fp/[a-f0-9]+-full\.[a-z]+",
-            resp.text,
-        )
-        img_urls = list(dict.fromkeys(photo_urls))  # deduplicate, preserve order
-        # Fallback: any og:image meta tags (older page formats)
-        if not img_urls:
-            img_urls = [
-                m["content"] for m in soup.find_all("meta", attrs={"property": "og:image"})
-                if m.get("content", "").startswith("http")
-            ]
-        if img_urls:
-            listing.image_url = ",".join(img_urls[:8])
+    # Always re-extract — never skip because a single stale URL is already stored.
+    photo_urls = re.findall(
+        r"https://photos\.zillowstatic\.com/fp/[a-f0-9]+-full\.[a-z]+",
+        resp.text,
+    )
+    img_urls = list(dict.fromkeys(photo_urls))  # deduplicate, preserve order
+    # Fallback: any og:image meta tags (older page formats)
+    if not img_urls:
+        img_urls = [
+            m["content"] for m in soup.find_all("meta", attrs={"property": "og:image"})
+            if m.get("content", "").startswith("http")
+        ]
+    if img_urls:
+        listing.image_url = ",".join(img_urls[:8])
 
     # --- Rebuild title now that we may have better address / bedrooms ---
     title_parts = []

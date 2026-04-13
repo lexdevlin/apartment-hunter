@@ -19,6 +19,7 @@ from datetime import datetime
 
 import streamlit.components.v1 as _components
 import pandas as pd
+import pydeck as pdk
 import requests as _requests
 import streamlit as st
 from supabase import create_client, Client
@@ -405,11 +406,26 @@ else:
                     _coords = _geocode(_q)
                     if _coords:
                         _lat, _lon = _coords
-                        st.map(
-                            pd.DataFrame({"lat": [_lat], "lon": [_lon]}),
-                            zoom=15,
-                            height=220,
-                        )
+                        st.pydeck_chart(pdk.Deck(
+                            initial_view_state=pdk.ViewState(
+                                latitude=_lat, longitude=_lon,
+                                zoom=15, pitch=0,
+                            ),
+                            layers=[pdk.Layer(
+                                "ScatterplotLayer",
+                                data=[{"lat": _lat, "lon": _lon}],
+                                get_position="[lon, lat]",
+                                get_fill_color=[30, 120, 220, 220],
+                                get_radius=12,
+                                radius_units="pixels",
+                                radius_min_pixels=6,
+                                radius_max_pixels=12,
+                                pickable=False,
+                            )],
+                            map_style="mapbox://styles/mapbox/light-v10",
+                            tooltip=False,
+                            height=300,
+                        ), use_container_width=True, height=300)
                     else:
                         st.caption(f"Could not locate: {_q}")
                 else:
