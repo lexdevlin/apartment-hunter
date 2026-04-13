@@ -241,7 +241,8 @@ def _image_carousel(images: list[str], key: str) -> None:
   .carousel-track img {{
     flex: 0 0 calc((100% - 12px) / 3);
     width: calc((100% - 12px) / 3);
-    height: 180px;
+    aspect-ratio: 1 / 1;
+    height: auto;
     object-fit: cover;
     border-radius: 6px;
     cursor: pointer;
@@ -311,7 +312,7 @@ def _image_carousel(images: list[str], key: str) -> None:
   render();
 }})();
 </script>
-""", height=220)
+""", height=280)
 
 
 # ---------------------------------------------------------------------------
