@@ -15,3 +15,5 @@ supabase
 curl_cffi
 streamlit
 pydeck
+streamlit-folium
+folium

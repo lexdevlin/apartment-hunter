@@ -13,15 +13,19 @@ Keys required:
   SUPABASE_KEY   — service role key (Settings → API → service_role)
 """
 
+import csv
+import json
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 
+import folium
 import streamlit.components.v1 as _components
 import pandas as pd
-import pydeck as pdk
 import requests as _requests
 import streamlit as st
+from streamlit_folium import st_folium
 from supabase import create_client, Client
 
 st.set_page_config(
@@ -68,9 +72,57 @@ def load_listings() -> list[dict]:
     return data
 
 
-@st.cache_data(ttl=86400)
-def _geocode(query: str) -> "tuple[float, float] | None":
-    """Geocode an address string via Nominatim. Results cached for 24 h."""
+@st.cache_resource
+def _load_geocode_cache() -> dict:
+    """Load the scraper's geocode_cache.json (keyed 'address|neighborhood')."""
+    p = Path(__file__).parent / "apartment_hunter" / "data" / "geocode_cache.json"
+    if not p.exists():
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+@st.cache_resource
+def _load_stations() -> list[dict]:
+    """Load subway_stations.csv → list of {name, routes, lat, lon}."""
+    p = Path(__file__).parent / "apartment_hunter" / "data" / "subway_stations.csv"
+    if not p.exists():
+        return []
+    stations = []
+    with open(p, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            try:
+                stations.append({
+                    "name":   row["name"],
+                    "routes": row["routes"],
+                    "lat":    float(row["lat"]),
+                    "lon":    float(row["lon"]),
+                })
+            except (KeyError, ValueError):
+                pass
+    return stations
+
+
+def _resolve_coords(address: str, neighborhood: str) -> "tuple[float, float] | None":
+    """
+    Look up (lat, lon) for a listing:
+      1. Geocode cache (address|neighborhood key — same format as subway.py)
+      2. Live Nominatim call as fallback
+    """
+    cache = _load_geocode_cache()
+    key = f"{address}|{neighborhood}" if address and neighborhood else (address or "")
+    if key in cache and cache[key]:
+        return tuple(cache[key])
+
+    # Strip unit number before geocoding
+    clean = re.sub(r"\s*#\S+$", "", address or "").strip()
+    if not clean:
+        return None
+    query = clean if re.search(r"\bNY\b|\bBrooklyn\b", clean, re.IGNORECASE) \
+        else f"{clean}, Brooklyn, NY"
     try:
         resp = _requests.get(
             "https://nominatim.openstreetmap.org/search",
@@ -84,6 +136,59 @@ def _geocode(query: str) -> "tuple[float, float] | None":
     except Exception:
         pass
     return None
+
+
+def _nearest_stations(lat: float, lon: float, n: int = 5) -> list[dict]:
+    """Return the n closest subway stations by straight-line distance."""
+    from math import radians, sin, cos, sqrt, atan2
+    stations = _load_stations()
+    scored = []
+    for s in stations:
+        dlat = radians(s["lat"] - lat)
+        dlon = radians(s["lon"] - lon)
+        a = sin(dlat/2)**2 + cos(radians(lat)) * cos(radians(s["lat"])) * sin(dlon/2)**2
+        dist_m = 6_371_000 * 2 * atan2(sqrt(a), sqrt(1-a))
+        scored.append((dist_m, s))
+    scored.sort(key=lambda x: x[0])
+    return [s for _, s in scored[:n]]
+
+
+def _listing_map(lat: float, lon: float) -> folium.Map:
+    """Build a Folium map centred on the listing with nearby subway stops."""
+    m = folium.Map(
+        location=[lat, lon],
+        zoom_start=15,
+        tiles="CartoDB positron",
+        scrollWheelZoom=False,
+    )
+
+    # Listing marker — blue circle
+    folium.CircleMarker(
+        location=[lat, lon],
+        radius=8,
+        color="#1e78dc",
+        fill=True,
+        fill_color="#1e78dc",
+        fill_opacity=0.9,
+        weight=2,
+        tooltip="Listing",
+    ).add_to(m)
+
+    # Subway station markers — small dark circles with route label
+    for s in _nearest_stations(lat, lon, n=5):
+        label = f"{s['name']} ({s['routes']})" if s["routes"] else s["name"]
+        folium.CircleMarker(
+            location=[s["lat"], s["lon"]],
+            radius=5,
+            color="#222",
+            fill=True,
+            fill_color="#333",
+            fill_opacity=0.85,
+            weight=1.5,
+            tooltip=label,
+        ).add_to(m)
+
+    return m
 
 
 def _set_status(url: str, status: "str | None") -> None:
@@ -385,39 +490,16 @@ else:
                     st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
 
             with top_right:
-                _loc = re.sub(r"\s*#\w+$", "", listing.get("address") or "").strip()
-                _q = ""
-                if _loc:
-                    _q = _loc if re.search(r"\bNY\b|\bBrooklyn\b", _loc, re.IGNORECASE) \
-                        else f"{_loc}, Brooklyn, NY"
-                elif hood:
-                    _q = f"{hood}, Brooklyn, NY"
-
-                if _q:
-                    _coords = _geocode(_q)
-                    if _coords:
-                        _lat, _lon = _coords
-                        st.pydeck_chart(pdk.Deck(
-                            initial_view_state=pdk.ViewState(
-                                latitude=_lat, longitude=_lon,
-                                zoom=15, pitch=0,
-                            ),
-                            layers=[pdk.Layer(
-                                "ScatterplotLayer",
-                                data=[{"lat": _lat, "lon": _lon}],
-                                get_position="[lon, lat]",
-                                get_fill_color=[30, 120, 220, 220],
-                                get_radius=8,
-                                radius_units="pixels",
-                                radius_min_pixels=5,
-                                radius_max_pixels=8,
-                                pickable=False,
-                            )],
-                            map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-                            tooltip=False,
-                        ), use_container_width=True, height=300)
-                    else:
-                        st.caption(f"📍 Could not locate: {_q}")
+                _coords = _resolve_coords(listing.get("address") or "", hood or "")
+                if _coords:
+                    _lat, _lon = _coords
+                    st_folium(
+                        _listing_map(_lat, _lon),
+                        use_container_width=True,
+                        height=300,
+                        returned_objects=[],
+                        key=f"map_{listing.get('listing_id') or url[-12:]}",
+                    )
                 else:
                     st.caption("📍 No address available to map.")
 
