@@ -14,6 +14,7 @@ Keys required:
 """
 
 import os
+from datetime import datetime
 
 import streamlit as st
 from supabase import create_client, Client
@@ -48,10 +49,16 @@ def load_listings() -> list[dict]:
     result = _get_client().table("listings").select("*").or_("delisted.is.null,delisted.eq.false").execute()
     data = result.data or []
     # Sort: priority first, then by score descending, then by date_found descending
+    def _date_ts(d) -> float:
+        try:
+            return datetime.fromisoformat(str(d)[:19]).timestamp() if d else 0.0
+        except ValueError:
+            return 0.0
+
     data.sort(key=lambda l: (
         not l.get("is_priority", False),
         -(l.get("priority_score") or 0),
-        -(l.get("date_found") or ""),
+        -_date_ts(l.get("date_found")),
     ))
     return data
 
@@ -164,7 +171,6 @@ filtered = _apply_filters(all_listings)
 # Summary metrics
 # ---------------------------------------------------------------------------
 
-from datetime import datetime  # noqa: E402 (import after streamlit setup)
 
 today_str     = datetime.utcnow().strftime("%Y-%m-%d")
 total_active  = len(all_listings)
