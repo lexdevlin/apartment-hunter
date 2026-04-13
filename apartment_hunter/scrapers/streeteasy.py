@@ -576,11 +576,21 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
         if re.search(r"rent.?stabiliz", full_text, re.IGNORECASE):
             listing.rent_stabilized = True
 
-    # --- Primary listing image (og:image) ---
+    # --- Listing images ---
     if not listing.image_url:
-        og_img = soup.find("meta", property="og:image")
-        if og_img and og_img.get("content"):
-            listing.image_url = og_img["content"]
+        # Collect all og:image tags (StreetEasy sometimes sets multiple)
+        img_urls = [
+            m["content"] for m in soup.find_all("meta", property="og:image")
+            if m.get("content", "").startswith("http")
+        ]
+        # Also pull from gallery <img> tags on known CDN domains
+        cdn_re = re.compile(r"(media\.streeteasy\.com|photos\.zillowstatic\.com|streeteasy-res\.cloudinary\.com)", re.IGNORECASE)
+        for img in soup.find_all("img", src=cdn_re):
+            src = img.get("src", "")
+            if src and src not in img_urls:
+                img_urls.append(src)
+        if img_urls:
+            listing.image_url = ",".join(dict.fromkeys(img_urls[:8]))
 
     # --- Rebuild title now that we may have better address / bedrooms ---
     title_parts = []

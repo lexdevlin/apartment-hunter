@@ -365,6 +365,8 @@ def _restore_from_row_cl(listing: Listing, row: dict) -> None:
         listing.washer_dryer = _bool(row.get("washer_dryer"))
     if listing.rent_stabilized is None:
         listing.rent_stabilized = _bool(row.get("rent_stabilized"))
+    if listing.image_url is None:
+        listing.image_url = row.get("image_url") or None
     # Restore title from CSV (detail page may have cleaned it up)
     stored_title = (row.get("title") or "").strip()
     if stored_title:
@@ -432,6 +434,22 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     # Cross street — extract from body text if no numbered address was found
     if listing.address is None:
         listing.address = _extract_cross_street(full_text)
+
+    # Images: collect all available image URLs (CL sets one og:image per photo)
+    if not listing.image_url:
+        img_urls = [
+            m.get("content", "")
+            for m in soup.find_all("meta", property="og:image")
+            if m.get("content", "").startswith("http")
+        ]
+        if not img_urls:
+            # Fallback: full-size URLs from swiper <img> tags
+            img_urls = list(dict.fromkeys(
+                img["src"] for img in soup.find_all("img", src=re.compile(r"images\.craigslist\.org"))
+                if img.get("src")
+            ))
+        if img_urls:
+            listing.image_url = ",".join(img_urls[:8])
 
     # Amenities
     if listing.dishwasher is None:

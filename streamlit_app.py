@@ -16,6 +16,8 @@ Keys required:
 import os
 from datetime import datetime
 
+import pandas as pd
+import requests as _requests
 import streamlit as st
 from supabase import create_client, Client
 
@@ -61,6 +63,24 @@ def load_listings() -> list[dict]:
         -_date_ts(l.get("date_found")),
     ))
     return data
+
+
+@st.cache_data(ttl=86400)
+def _geocode(query: str) -> "tuple[float, float] | None":
+    """Geocode an address string via Nominatim. Results cached for 24 h."""
+    try:
+        resp = _requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": query, "format": "json", "limit": 1},
+            headers={"User-Agent": "apartment-hunter-app/1.0"},
+            timeout=5,
+        )
+        data = resp.json()
+        if data:
+            return float(data[0]["lat"]), float(data[0]["lon"])
+    except Exception:
+        pass
+    return None
 
 
 def _set_status(url: str, status: "str | None") -> None:
@@ -234,44 +254,70 @@ else:
                     unsafe_allow_html=True,
                 )
 
-            # ── Body: image + details ────────────────────────────────────────
-            img_col, detail_col = st.columns([1, 3])
+            # ── Image carousel (up to 3 at a time) ──────────────────────────
+            images = [u.strip() for u in (image_url or "").split(",") if u.strip()]
+            if images:
+                shown = images[:3]
+                img_cols = st.columns(len(shown))
+                for col, img_src in zip(img_cols, shown):
+                    with col:
+                        st.image(img_src, use_container_width=True)
+                if len(images) > 3:
+                    st.caption(f"+{len(images) - 3} more photo(s) available on the listing page")
+            else:
+                st.markdown(
+                    '<div style="background:#1e1e1e;height:100px;border-radius:6px;'
+                    'display:flex;align-items:center;justify-content:center;'
+                    'color:#555;font-size:0.78rem;margin-bottom:0.5rem">No image</div>',
+                    unsafe_allow_html=True,
+                )
 
-            with img_col:
-                if image_url:
-                    st.image(image_url, use_container_width=True)
+            # ── Details ──────────────────────────────────────────────────────
+            detail_line = _fmt_beds_baths_floor(beds, baths, floor_)
+            if detail_line:
+                st.markdown(detail_line)
+
+            if subway:
+                st.markdown(f"🚇 {subway}")
+
+            badges = []
+            if is_priority:
+                badges.append(_badge("★ Priority", "#8B0000"))
+            if rent_stab:
+                badges.append(_badge("Rent stabilized", "#5c4a00"))
+            if dishwasher:
+                badges.append(_badge("Dishwasher", "#1a5c33"))
+            if wd:
+                badges.append(_badge("W/D in unit", "#1a3a6b"))
+            if user_status == "saved":
+                badges.append(_badge("★ Saved", "#3a3a8b"))
+            if badges:
+                st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
+
+            # ── Map ──────────────────────────────────────────────────────────
+            with st.expander("📍 Map"):
+                _loc = listing.get("address") or ""
+                _fallback = hood or ""
+                if _loc:
+                    _q = _loc if ("brooklyn" in _loc.lower() or "ny" in _loc.lower()) \
+                        else f"{_loc}, Brooklyn, NY"
+                elif _fallback:
+                    _q = f"{_fallback}, Brooklyn, NY"
                 else:
-                    st.markdown(
-                        '<div style="background:#1e1e1e;height:130px;border-radius:6px;'
-                        'display:flex;align-items:center;justify-content:center;'
-                        'color:#555;font-size:0.78rem">No image</div>',
-                        unsafe_allow_html=True,
-                    )
-
-            with detail_col:
-                # Beds / baths / floor
-                detail_line = _fmt_beds_baths_floor(beds, baths, floor_)
-                if detail_line:
-                    st.markdown(detail_line)
-
-                # Subway
-                if subway:
-                    st.markdown(f"🚇 {subway}")
-
-                # Amenity + status badges
-                badges = []
-                if is_priority:
-                    badges.append(_badge("★ Priority", "#8B0000"))
-                if rent_stab:
-                    badges.append(_badge("Rent stabilized", "#5c4a00"))
-                if dishwasher:
-                    badges.append(_badge("Dishwasher", "#1a5c33"))
-                if wd:
-                    badges.append(_badge("W/D in unit", "#1a3a6b"))
-                if user_status == "saved":
-                    badges.append(_badge("★ Saved", "#3a3a8b"))
-                if badges:
-                    st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
+                    _q = ""
+                if _q:
+                    _coords = _geocode(_q)
+                    if _coords:
+                        _lat, _lon = _coords
+                        st.map(
+                            pd.DataFrame({"lat": [_lat], "lon": [_lon]}),
+                            zoom=15,
+                            height=220,
+                        )
+                    else:
+                        st.caption(f"Could not locate: {_q}")
+                else:
+                    st.caption("No address available to map.")
 
             # ── Actions ──────────────────────────────────────────────────────
             st.markdown("")
