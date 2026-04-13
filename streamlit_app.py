@@ -343,9 +343,10 @@ else:
         date_listed = (listing.get("date_listed") or "")[:10]
 
         with st.container(border=True):
-            # ── Header ──────────────────────────────────────────────────────
-            hcol_title, hcol_price = st.columns([4, 1])
-            with hcol_title:
+            # ── Top row: details (left) + map (right) ───────────────────────
+            top_left, top_right = st.columns(2)
+
+            with top_left:
                 priority_prefix = "★ " if is_priority else ""
                 st.markdown(f"#### {priority_prefix}{address}")
                 meta_parts = [_source_label(source)]
@@ -356,52 +357,42 @@ else:
                 if date_listed:
                     meta_parts.append(f"listed {date_listed}")
                 st.caption("  ·  ".join(meta_parts))
-            with hcol_price:
+
                 st.markdown(
-                    f'<p style="font-size:1.4rem;font-weight:700;margin:0;text-align:right">'
+                    f'<p style="font-size:1.4rem;font-weight:700;margin:4px 0">'
                     f'{_fmt_price(price)}</p>',
                     unsafe_allow_html=True,
                 )
 
-            # ── Image carousel ───────────────────────────────────────────────
-            images = [u.strip() for u in (image_url or "").split(",") if u.strip()]
-            _image_carousel(images, key=listing.get("listing_id") or url[-12:])
+                detail_line = _fmt_beds_baths_floor(beds, baths, floor_)
+                if detail_line:
+                    st.markdown(detail_line)
+                if subway:
+                    st.markdown(f"🚇 {subway}")
 
-            # ── Details ──────────────────────────────────────────────────────
-            detail_line = _fmt_beds_baths_floor(beds, baths, floor_)
-            if detail_line:
-                st.markdown(detail_line)
+                badges = []
+                if is_priority:
+                    badges.append(_badge("★ Priority", "#8B0000"))
+                if rent_stab:
+                    badges.append(_badge("Rent stabilized", "#5c4a00"))
+                if dishwasher:
+                    badges.append(_badge("Dishwasher", "#1a5c33"))
+                if wd:
+                    badges.append(_badge("W/D in unit", "#1a3a6b"))
+                if user_status == "saved":
+                    badges.append(_badge("★ Saved", "#3a3a8b"))
+                if badges:
+                    st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
 
-            if subway:
-                st.markdown(f"🚇 {subway}")
-
-            badges = []
-            if is_priority:
-                badges.append(_badge("★ Priority", "#8B0000"))
-            if rent_stab:
-                badges.append(_badge("Rent stabilized", "#5c4a00"))
-            if dishwasher:
-                badges.append(_badge("Dishwasher", "#1a5c33"))
-            if wd:
-                badges.append(_badge("W/D in unit", "#1a3a6b"))
-            if user_status == "saved":
-                badges.append(_badge("★ Saved", "#3a3a8b"))
-            if badges:
-                st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
-
-            # ── Map ──────────────────────────────────────────────────────────
-            with st.expander("📍 Map"):
-                _loc = listing.get("address") or ""
-                # Strip unit designator — Nominatim can't resolve sub-building addresses
-                _loc = re.sub(r"\s*#\w+$", "", _loc).strip()
-                _fallback = hood or ""
+            with top_right:
+                _loc = re.sub(r"\s*#\w+$", "", listing.get("address") or "").strip()
+                _q = ""
                 if _loc:
                     _q = _loc if re.search(r"\bNY\b|\bBrooklyn\b", _loc, re.IGNORECASE) \
                         else f"{_loc}, Brooklyn, NY"
-                elif _fallback:
-                    _q = f"{_fallback}, Brooklyn, NY"
-                else:
-                    _q = ""
+                elif hood:
+                    _q = f"{hood}, Brooklyn, NY"
+
                 if _q:
                     _coords = _geocode(_q)
                     if _coords:
@@ -416,20 +407,23 @@ else:
                                 data=[{"lat": _lat, "lon": _lon}],
                                 get_position="[lon, lat]",
                                 get_fill_color=[30, 120, 220, 220],
-                                get_radius=12,
+                                get_radius=8,
                                 radius_units="pixels",
-                                radius_min_pixels=6,
-                                radius_max_pixels=12,
+                                radius_min_pixels=5,
+                                radius_max_pixels=8,
                                 pickable=False,
                             )],
-                            map_style="mapbox://styles/mapbox/light-v10",
+                            map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
                             tooltip=False,
-                            height=300,
                         ), use_container_width=True, height=300)
                     else:
-                        st.caption(f"Could not locate: {_q}")
+                        st.caption(f"📍 Could not locate: {_q}")
                 else:
-                    st.caption("No address available to map.")
+                    st.caption("📍 No address available to map.")
+
+            # ── Bottom row: image carousel (full width) ──────────────────────
+            images = [u.strip() for u in (image_url or "").split(",") if u.strip()]
+            _image_carousel(images, key=listing.get("listing_id") or url[-12:])
 
             # ── Actions ──────────────────────────────────────────────────────
             st.markdown("")
