@@ -312,6 +312,12 @@ filtered = _apply_filters(all_listings)
 # DEBUG (temporary) — remove once map is confirmed working
 # ---------------------------------------------------------------------------
 with st.expander("🔧 Map debug info", expanded=False):
+    _stations_path = Path(__file__).parent / "apartment_hunter" / "data" / "subway_stations.csv"
+    st.write(f"**CSV path:** `{_stations_path}`")
+    st.write(f"**CSV exists:** {_stations_path.exists()}")
+    if st.button("Clear station cache"):
+        _load_stations.clear()
+        st.rerun()
     stations = _load_stations()
     st.write(f"**Stations loaded:** {len(stations)}")
     if all_listings:
