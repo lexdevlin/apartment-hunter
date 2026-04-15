@@ -85,24 +85,27 @@ def _load_geocode_cache() -> dict:
         return {}
 
 
-@st.cache_resource
+@st.cache_data(ttl=86400)
 def _load_stations() -> list[dict]:
     """Load subway_stations.csv → list of {name, routes, lat, lon}."""
     p = Path(__file__).parent / "apartment_hunter" / "data" / "subway_stations.csv"
     if not p.exists():
         return []
     stations = []
-    with open(p, encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            try:
-                stations.append({
-                    "name":   row["name"],
-                    "routes": row["routes"],
-                    "lat":    float(row["lat"]),
-                    "lon":    float(row["lon"]),
-                })
-            except (KeyError, ValueError):
-                pass
+    try:
+        with open(p, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    stations.append({
+                        "name":   row["name"],
+                        "routes": row["routes"],
+                        "lat":    float(row["lat"]),
+                        "lon":    float(row["lon"]),
+                    })
+                except (KeyError, ValueError):
+                    pass
+    except Exception:
+        return []
     return stations
 
 
@@ -165,28 +168,38 @@ def _listing_map(lat: float, lon: float) -> folium.Map:
     # Listing marker — blue circle
     folium.CircleMarker(
         location=[lat, lon],
-        radius=8,
+        radius=9,
         color="#1e78dc",
         fill=True,
         fill_color="#1e78dc",
-        fill_opacity=0.9,
+        fill_opacity=0.95,
         weight=2,
         tooltip="Listing",
     ).add_to(m)
 
-    # Subway station markers — small dark circles with route label
-    for s in _nearest_stations(lat, lon, n=5):
-        label = f"{s['name']} ({s['routes']})" if s["routes"] else s["name"]
+    # Subway station markers — orange circles with route label
+    nearby = _nearest_stations(lat, lon, n=5)
+    all_points = [[lat, lon]]
+    for s in nearby:
+        label = f"🚇 {s['name']} ({s['routes']})" if s["routes"] else f"🚇 {s['name']}"
         folium.CircleMarker(
             location=[s["lat"], s["lon"]],
-            radius=5,
-            color="#222",
+            radius=7,
+            color="#d45f00",
             fill=True,
-            fill_color="#333",
-            fill_opacity=0.85,
-            weight=1.5,
+            fill_color="#f07800",
+            fill_opacity=0.9,
+            weight=2,
             tooltip=label,
         ).add_to(m)
+        all_points.append([s["lat"], s["lon"]])
+
+    # Fit viewport to include all markers
+    if len(all_points) > 1:
+        lats = [p[0] for p in all_points]
+        lons = [p[1] for p in all_points]
+        m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]],
+                     padding=(20, 20))
 
     return m
 
