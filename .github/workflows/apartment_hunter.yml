@@ -28,7 +28,7 @@ jobs:
 
       - name: Run scraper
         env:
-          # Shared Azure AD app (same as personal log)
+          # Shared Azure AD app
           AZURE_CLIENT_ID:   ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID:   ${{ secrets.AZURE_TENANT_ID }}
 
@@ -42,6 +42,11 @@ jobs:
 
           # Azure Blob Storage — same connection string as daily report
           AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+
+          # Supabase URL and key for upserting listing data
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
 
         run: python -m apartment_hunter.main
 
