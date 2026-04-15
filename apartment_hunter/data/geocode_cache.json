@@ -1761,5 +1761,103 @@
   "241 Rockaway Avenue #2R|Crown Heights": [
     40.6743568,
     -73.9108502
+  ],
+  "67 Granite Street #4BF|Bushwick": [
+    40.683741,
+    -73.9068825
+  ],
+  "237 Himrod Street #2R|Bushwick": [
+    40.7005159,
+    -73.9197121
+  ],
+  "1092 Hancock Street #3C|Bushwick": [
+    40.6891524,
+    -73.9138977
+  ],
+  "66-42 Forest Avenue #3F|Ridgewood": [
+    40.7064775,
+    -73.903057
+  ],
+  "18-74 Menahan Street #3R|Ridgewood": [
+    40.7108531,
+    -73.9012554
+  ],
+  "1875 Atlantic Avenue #2S|Bedford Stuyvesant": [
+    40.677483,
+    -73.9229949
+  ],
+  "1556 Fulton Street #3F|Bedford Stuyvesant": [
+    40.6796212,
+    -73.9386884
+  ],
+  "458 Bainbridge Street #2|Bedford Stuyvesant": [
+    40.6822212,
+    -73.9185302
+  ],
+  "353 Franklin Avenue #03|Bedford Stuyvesant": [
+    40.6873309,
+    -73.9566905
+  ],
+  "38 Malcolm X Boulevard #2AA|Bedford Stuyvesant": [
+    40.6928308,
+    -73.9311649
+  ],
+  "745 Lafayette Avenue #2D|Bedford Stuyvesant": [
+    40.6910069,
+    -73.9433235
+  ],
+  "85 Rockaway Avenue #2A|Bedford Stuyvesant": [
+    40.6800481,
+    -73.910943
+  ],
+  "11 Hunterfly Place #3D|Bedford Stuyvesant": [
+    40.6778544,
+    -73.9281534
+  ],
+  "76 Downing Street #3|Clinton Hill": [
+    40.6835344,
+    -73.9610549
+  ],
+  "89 Moore Street #2B|Williamsburg": [
+    40.7039876,
+    -73.9421911
+  ],
+  "1266 Park Place #A|Crown Heights": [
+    40.672437,
+    -73.935456
+  ],
+  "130 New York Avenue #5|Crown Heights": [
+    40.6658135,
+    -73.9480976
+  ],
+  "979 St Johns Place #2|Crown Heights": [
+    40.6716045,
+    -73.9458745
+  ],
+  "542 Eastern Parkway #2D|Crown Heights": [
+    40.66974,
+    -73.94805
+  ],
+  "2441 Dean Street #2R|Crown Heights": [
+    40.6745946,
+    -73.9065753
+  ],
+  "1388 Bedford Avenue #3|Crown Heights": [
+    40.6757761,
+    -73.9534698
+  ],
+  "building on Midwood Street & Kingston ave|Crown Heights": null,
+  "1598 Eastern Parkway, #3C|Crown Heights": [
+    40.66974,
+    -73.94805
+  ],
+  "Nearby subway st & ions|Crown Heights": null,
+  "1114 Halsey St, #3R|Bushwick": [
+    40.6891554,
+    -73.9115486
+  ],
+  "483 evergreen avenue|Bushwick": [
+    40.6912445,
+    -73.9169921
   ]
 }
