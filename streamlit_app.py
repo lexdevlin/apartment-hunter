@@ -309,6 +309,25 @@ def _apply_filters(listings: list[dict]) -> list[dict]:
 filtered = _apply_filters(all_listings)
 
 # ---------------------------------------------------------------------------
+# DEBUG (temporary) — remove once map is confirmed working
+# ---------------------------------------------------------------------------
+with st.expander("🔧 Map debug info", expanded=False):
+    stations = _load_stations()
+    st.write(f"**Stations loaded:** {len(stations)}")
+    if all_listings:
+        first = all_listings[0]
+        addr = first.get("address") or ""
+        hood = first.get("neighborhood") or ""
+        coords = _resolve_coords(addr, hood)
+        st.write(f"**First listing:** `{addr}` / `{hood}`")
+        st.write(f"**Resolved coords:** {coords}")
+        if coords:
+            nearest = _nearest_stations(coords[0], coords[1], n=5)
+            st.write(f"**Nearest stations ({len(nearest)}):**")
+            for s in nearest:
+                st.write(f"  - {s['name']} ({s['routes']}) @ {s['lat']:.5f}, {s['lon']:.5f}")
+
+# ---------------------------------------------------------------------------
 # Summary metrics
 # ---------------------------------------------------------------------------
 
