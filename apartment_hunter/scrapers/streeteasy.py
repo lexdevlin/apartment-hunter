@@ -507,7 +507,9 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     # Mark these now so the upsert step can persist the flag rather than
     # treating a re-sighted URL as proof the listing is still active.
     _body = full_text.lower()
-    if any(p in _body for p in ("unavailable", "delisted", "rented on")):
+    _off_market_triggers = [p for p in ("unavailable", "delisted", "rented on") if p in _body]
+    if _off_market_triggers:
+        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: off-market triggers={_off_market_triggers}, body snippet={full_text[:200]!r}")
         listing.delisted = True
         return listing
 
