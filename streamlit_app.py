@@ -340,6 +340,11 @@ priority_only = st.sidebar.checkbox("Priority only", value=False)
 
 sort_by = st.sidebar.selectbox("Sort by", ["Score", "Price ↑", "Price ↓"], index=0)
 
+st.sidebar.markdown("**Amenities**")
+filter_rent_stab  = st.sidebar.checkbox("Rent stabilized", value=False, key="f_rs")
+filter_dishwasher = st.sidebar.checkbox("Dishwasher", value=False, key="f_dw")
+filter_wd         = st.sidebar.checkbox("W/D in unit", value=False, key="f_wd")
+
 st.sidebar.markdown("---")
 
 # Load data (needed to populate filter options)
@@ -353,11 +358,6 @@ selected_sources = [src for src in sources
                     if st.sidebar.checkbox(_source_label(src), value=True, key=f"src_{src}")]
 
 selected_hoods   = st.sidebar.multiselect("Neighborhood", neighborhoods, default=neighborhoods)
-
-st.sidebar.markdown("**Amenities**")
-filter_rent_stab  = st.sidebar.checkbox("Rent stabilized", value=False, key="f_rs")
-filter_dishwasher = st.sidebar.checkbox("Dishwasher", value=False, key="f_dw")
-filter_wd         = st.sidebar.checkbox("W/D in unit", value=False, key="f_wd")
 
 st.sidebar.markdown("---")
 
@@ -484,7 +484,7 @@ def _image_carousel(images: list[str], key: str) -> None:
   .carousel-track img {{
     flex: 0 0 calc((100% - 12px) / 3);
     width: calc((100% - 12px) / 3);
-    height: 180px;
+    height: 200px;
     object-fit: contain;
     background: #111;
     border-radius: 6px;
@@ -553,9 +553,24 @@ def _image_carousel(images: list[str], key: str) -> None:
   }};
 
   render();
+
+  // Size images to 4:3 of their rendered width, re-run on resize
+  function sizeImgs() {{
+    const wrap = document.getElementById('cw-{key}');
+    if (!wrap) return;
+    const imgW = Math.floor((wrap.clientWidth - 12) / 3);
+    const imgH = Math.floor(imgW * 0.75);
+    track.querySelectorAll('img').forEach(function(img) {{
+      img.style.height = imgH + 'px';
+    }});
+  }}
+  sizeImgs();
+  if (window.ResizeObserver) {{
+    new ResizeObserver(sizeImgs).observe(document.getElementById('cw-{key}'));
+  }}
 }})();
 </script>
-""", height=280)
+""", height=380)
 
 
 # ---------------------------------------------------------------------------
