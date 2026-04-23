@@ -238,15 +238,17 @@ def _listing_map(lat: float, lon: float) -> folium.Map:
         scrollWheelZoom=False,
     )
 
-    # Listing marker — blue circle
-    folium.CircleMarker(
+    # Listing marker — blue star
+    folium.Marker(
         location=[lat, lon],
-        radius=9,
-        color="#1e78dc",
-        fill=True,
-        fill_color="#1e78dc",
-        fill_opacity=0.95,
-        weight=2,
+        icon=folium.DivIcon(
+            html=(
+                '<div style="font-size:22px;color:#1e78dc;'
+                'text-shadow:0 1px 3px rgba(0,0,0,0.6);line-height:1">★</div>'
+            ),
+            icon_size=(22, 22),
+            icon_anchor=(11, 11),
+        ),
         tooltip="Listing",
     ).add_to(m)
 
@@ -336,6 +338,8 @@ status_view = st.sidebar.radio(
 
 priority_only = st.sidebar.checkbox("Priority only", value=False)
 
+sort_by = st.sidebar.selectbox("Sort by", ["Score", "Price ↑", "Price ↓"], index=0)
+
 st.sidebar.markdown("---")
 
 # Load data (needed to populate filter options)
@@ -349,6 +353,11 @@ selected_sources = [src for src in sources
                     if st.sidebar.checkbox(_source_label(src), value=True, key=f"src_{src}")]
 
 selected_hoods   = st.sidebar.multiselect("Neighborhood", neighborhoods, default=neighborhoods)
+
+st.sidebar.markdown("**Amenities**")
+filter_rent_stab  = st.sidebar.checkbox("Rent stabilized", value=False, key="f_rs")
+filter_dishwasher = st.sidebar.checkbox("Dishwasher", value=False, key="f_dw")
+filter_wd         = st.sidebar.checkbox("W/D in unit", value=False, key="f_wd")
 
 st.sidebar.markdown("---")
 
@@ -377,6 +386,12 @@ def _apply_filters(listings: list[dict]) -> list[dict]:
             continue
         if priority_only and not l.get("is_priority"):
             continue
+        if filter_rent_stab and not l.get("rent_stabilized"):
+            continue
+        if filter_dishwasher and not l.get("dishwasher"):
+            continue
+        if filter_wd and not l.get("washer_dryer"):
+            continue
         if selected_sources and l.get("source") not in selected_sources:
             continue
         if selected_hoods and l.get("neighborhood") not in selected_hoods:
@@ -386,6 +401,11 @@ def _apply_filters(listings: list[dict]) -> list[dict]:
 
 
 filtered = _apply_filters(all_listings)
+
+if sort_by == "Price ↑":
+    filtered.sort(key=lambda l: l.get("price") or 999_999)
+elif sort_by == "Price ↓":
+    filtered.sort(key=lambda l: -(l.get("price") or 0))
 
 # ---------------------------------------------------------------------------
 # DEBUG (temporary) — remove once map is confirmed working
@@ -464,9 +484,9 @@ def _image_carousel(images: list[str], key: str) -> None:
   .carousel-track img {{
     flex: 0 0 calc((100% - 12px) / 3);
     width: calc((100% - 12px) / 3);
-    aspect-ratio: 1 / 1;
-    height: auto;
-    object-fit: cover;
+    height: 180px;
+    object-fit: contain;
+    background: #111;
     border-radius: 6px;
     cursor: pointer;
   }}
