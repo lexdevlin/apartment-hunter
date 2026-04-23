@@ -55,7 +55,7 @@ def _get_client() -> Client:
 
 @st.cache_data(ttl=300)
 def load_listings() -> list[dict]:
-    result = _get_client().table("listings").select("*").or_("delisted.is.null,delisted.eq.false").execute()
+    result = _get_client().table("listings").select("*").or_("delisted.is.null,delisted.is.false").execute()
     data = result.data or []
     # Sort: priority first, then by score descending, then by date_found descending
     def _date_ts(d) -> float:
@@ -377,6 +377,8 @@ st.sidebar.caption(
 def _apply_filters(listings: list[dict]) -> list[dict]:
     out = []
     for l in listings:
+        if l.get("delisted"):
+            continue
         status = l.get("user_status")
         if status_view == "Unreviewed" and status is not None:
             continue
