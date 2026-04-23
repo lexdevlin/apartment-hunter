@@ -11,7 +11,7 @@ Required env vars:
 The service role key bypasses Row-Level Security, which is what we want
 for a server-side scraper. Never expose this key in the frontend.
 
-Upsert rules (mirrors the CSV logic in test_scrape.py):
+Upsert rules (mirrors the CSV logic in main.py):
   - url is the conflict key (PRIMARY KEY)
   - user_status is never included in the payload — it is owned by the UI
   - All other columns are written on every upsert; the merge/preserve logic
@@ -146,7 +146,7 @@ def upsert_listings(merged_rows: list[dict]) -> int:
 
     Args:
         merged_rows: list of dicts as produced by _upsert_listings() in
-                     test_scrape.py — all values are strings (CSV format).
+                     main.py — all values are strings (CSV format).
 
     Returns:
         Total number of rows sent to Supabase.
