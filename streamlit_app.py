@@ -308,7 +308,7 @@ def _fmt_beds_baths_floor(beds, baths, floor_) -> str:
     if baths is not None:
         parts.append(f"{float(baths):g} bath{'s' if float(baths) != 1 else ''}")
     if floor_:
-        parts.append(f"floor {floor_}")
+        parts.append(f"{floor_} floor")
     return "  ·  ".join(parts)
 
 
@@ -438,6 +438,40 @@ with st.expander("🔧 Map debug info", expanded=False):
 # Summary metrics
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Back-to-top button — injected into the parent page DOM via a hidden iframe
+# ---------------------------------------------------------------------------
+_components.html("""
+<script>
+(function() {
+  var pd = window.parent.document;
+  var existing = pd.getElementById('apt-btt');
+  if (existing) existing.remove();
+
+  var btn = pd.createElement('button');
+  btn.id  = 'apt-btt';
+  btn.textContent = '↑';
+  btn.title = 'Back to top';
+  btn.style.cssText =
+    'display:none;position:fixed;bottom:28px;right:28px;z-index:9999;' +
+    'width:40px;height:40px;border-radius:50%;border:none;' +
+    'background:#1e78dc;color:#fff;font-size:20px;line-height:40px;' +
+    'text-align:center;cursor:pointer;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.35);transition:opacity 0.2s;';
+
+  var scroller = pd.querySelector('[data-testid="stAppViewContainer"]')
+              || pd.querySelector('section.main')
+              || pd.body;
+
+  btn.onclick = function() { scroller.scrollTo({top: 0, behavior: 'smooth'}); };
+  scroller.addEventListener('scroll', function() {
+    btn.style.display = scroller.scrollTop > 400 ? 'block' : 'none';
+  });
+  pd.body.appendChild(btn);
+})();
+</script>
+""", height=0)
 
 today_str     = datetime.utcnow().strftime("%Y-%m-%d")
 total_active  = len(all_listings)
@@ -577,13 +611,30 @@ def _image_carousel(images: list[str], key: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pagination
+# ---------------------------------------------------------------------------
+
+_PAGE_SIZE = 10
+
+# Reset to page 1 whenever any filter or sort changes
+_filter_key = (status_view, priority_only, sort_by,
+               tuple(selected_sources), tuple(selected_hoods),
+               filter_rent_stab, filter_dishwasher, filter_wd)
+if st.session_state.get("_filter_key") != _filter_key:
+    st.session_state["_filter_key"] = _filter_key
+    st.session_state["_page"] = 1
+
+_visible_count = st.session_state.get("_page", 1) * _PAGE_SIZE
+visible_listings = filtered[:_visible_count]
+
+# ---------------------------------------------------------------------------
 # Listing cards
 # ---------------------------------------------------------------------------
 
 if not filtered:
     st.info("No listings match the current filters.")
 else:
-    for listing in filtered:
+    for listing in visible_listings:
         url        = listing.get("url", "")
         source     = listing.get("source", "")
         address    = listing.get("address") or listing.get("title") or "Listing"
@@ -697,3 +748,13 @@ else:
             # Empty column for spacing
             with act_undo:
                 pass
+
+    # Load more
+    if _visible_count < len(filtered):
+        remaining = len(filtered) - _visible_count
+        st.markdown("")
+        if st.button(f"Load {min(_PAGE_SIZE, remaining)} more  ({remaining} remaining)", use_container_width=True):
+            st.session_state["_page"] = st.session_state.get("_page", 1) + 1
+            st.rerun()
+    elif len(filtered) > _PAGE_SIZE:
+        st.caption(f"All {len(filtered)} listings shown.")
