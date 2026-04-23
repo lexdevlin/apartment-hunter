@@ -460,7 +460,7 @@ def _image_carousel(images: list[str], key: str) -> None:
     """Render a horizontally-scrollable carousel showing 3 images at a time."""
     if not images:
         _components.html(
-            '<div style="background:#1e1e1e;height:180px;border-radius:6px;'
+            '<div style="background:#1e1e1e;height:200px;border-radius:6px;'
             'display:flex;align-items:center;justify-content:center;'
             'color:#555;font-size:0.78rem">No image</div>',
             height=190,
@@ -474,6 +474,7 @@ def _image_carousel(images: list[str], key: str) -> None:
     position: relative;
     width: 100%;
     overflow: hidden;
+    border-radius: 6px;
     user-select: none;
   }}
   .carousel-track {{
