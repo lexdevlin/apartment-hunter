@@ -448,14 +448,23 @@ _components.html("""
 <script>
 (function() {
   try {
-    // Try window.parent first, fall back to window.top
     var pw, pd;
     try { pw = window.parent; pd = window.parent.document; }
-    catch(e) { pw = window.top; pd = window.top.document; }
+    catch(e) { pw = window.top;  pd = window.top.document;  }
 
-    var existing = pd.getElementById('apt-btt');
-    if (existing) existing.remove();
+    // Clean up from previous renders
+    ['apt-btt', 'apt-sentinel'].forEach(function(id) {
+      var el = pd.getElementById(id);
+      if (el) el.remove();
+    });
 
+    // Invisible sentinel pinned to the very top of the page
+    var sentinel = pd.createElement('div');
+    sentinel.id = 'apt-sentinel';
+    sentinel.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none;';
+    pd.body.insertBefore(sentinel, pd.body.firstChild);
+
+    // Floating button
     var btn = pd.createElement('button');
     btn.id = 'apt-btt';
     btn.textContent = '↑';
@@ -467,39 +476,29 @@ _components.html("""
       'text-align:center;cursor:pointer;' +
       'box-shadow:0 2px 10px rgba(0,0,0,0.4);';
 
-    // All known Streamlit scroll container selectors across versions
-    var SELECTORS = [
-      '[data-testid="stAppViewContainer"]',
-      '[data-testid="stMain"]',
-      'section.main',
-      '.stMainBlockContainer',
-      '.main'
-    ];
-
-    function getScrollTop() {
-      for (var i = 0; i < SELECTORS.length; i++) {
-        var el = pd.querySelector(SELECTORS[i]);
-        if (el && el.scrollTop > 0) return [el.scrollTop, el];
-      }
-      var wy = pw.scrollY || pw.pageYOffset || pd.documentElement.scrollTop || 0;
-      return [wy, null];
-    }
-
+    // On click: find whichever element actually has scrollTop > 0 and reset it
     btn.onclick = function() {
-      var s = getScrollTop();
-      if (s[1]) { s[1].scrollTo({top: 0, behavior: 'smooth'}); }
-      pw.scrollTo({top: 0, behavior: 'smooth'});
+      var best = null, bestVal = pw.scrollY || pw.pageYOffset || 0;
+      pd.querySelectorAll('*').forEach(function(el) {
+        if (el.scrollTop > bestVal) { bestVal = el.scrollTop; best = el; }
+      });
+      if (best) { best.scrollTo({top: 0, behavior: 'smooth'}); }
+      else       { pw.scrollTo({top: 0, behavior: 'smooth'}); }
     };
 
     pd.body.appendChild(btn);
-    console.log('[apt-btt] back-to-top button injected');
 
-    setInterval(function() {
-      btn.style.display = getScrollTop()[0] > 400 ? 'block' : 'none';
-    }, 250);
+    // IntersectionObserver: show button when sentinel scrolls out of viewport.
+    // Works regardless of which element is the actual scroll container.
+    if (window.IntersectionObserver) {
+      new IntersectionObserver(function(entries) {
+        btn.style.display = entries[0].isIntersecting ? 'none' : 'block';
+      }, { threshold: 0 }).observe(sentinel);
+    }
 
+    console.log('[apt-btt] injected (IntersectionObserver)');
   } catch(e) {
-    console.error('[apt-btt] failed to inject back-to-top button:', e);
+    console.error('[apt-btt] error:', e);
   }
 })();
 </script>
