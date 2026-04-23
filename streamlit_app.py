@@ -141,6 +141,29 @@ def _resolve_coords(address: str, neighborhood: str) -> "tuple[float, float] | N
     return None
 
 
+# Official MTA line colors (hex)
+_MTA_COLORS: dict[str, str] = {
+    "1": "#EE352E", "2": "#EE352E", "3": "#EE352E",   # Red
+    "4": "#00933C", "5": "#00933C", "6": "#00933C",   # Green
+    "7": "#B933AD",                                    # Purple
+    "A": "#0039A6", "C": "#0039A6", "E": "#0039A6",   # Blue
+    "B": "#FF6319", "D": "#FF6319", "F": "#FF6319", "M": "#FF6319",  # Orange
+    "G": "#6CBE45",                                    # Light green
+    "J": "#996633", "Z": "#996633",                    # Brown
+    "L": "#A7A9AC",                                    # Gray
+    "N": "#FCCC0A", "Q": "#FCCC0A", "R": "#FCCC0A", "W": "#FCCC0A",  # Yellow
+    "S": "#808183", "SIR": "#0039A6",                  # Shuttle gray / SIR blue
+}
+
+
+def _station_color(routes: str) -> str:
+    """Return the MTA color for a station based on its first listed route."""
+    if not routes:
+        return "#808183"
+    first = re.split(r"[,/\s]+", routes.strip())[0].upper()
+    return _MTA_COLORS.get(first, "#808183")
+
+
 def _nearest_stations(lat: float, lon: float, n: int = 5) -> list[dict]:
     """Return the n closest subway stations by straight-line distance."""
     from math import radians, sin, cos, sqrt, atan2
@@ -177,17 +200,18 @@ def _listing_map(lat: float, lon: float) -> folium.Map:
         tooltip="Listing",
     ).add_to(m)
 
-    # Subway station markers — orange circles with route label
+    # Subway station markers — colored by MTA line
     nearby = _nearest_stations(lat, lon, n=5)
     all_points = [[lat, lon]]
     for s in nearby:
         label = f"🚇 {s['name']} ({s['routes']})" if s["routes"] else f"🚇 {s['name']}"
+        color = _station_color(s["routes"])
         folium.CircleMarker(
             location=[s["lat"], s["lon"]],
             radius=7,
-            color="#d45f00",
+            color=color,
             fill=True,
-            fill_color="#f07800",
+            fill_color=color,
             fill_opacity=0.9,
             weight=2,
             tooltip=label,

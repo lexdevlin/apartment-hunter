@@ -648,10 +648,28 @@ def main():
     with open(CONFIG_PATH, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # Load existing CSV up front so we can report new vs re-seen counts per source
+    # Load existing rows — prefer local CSV (fast, no network); fall back to
+    # OneDrive when running in GitHub Actions where no CSV persists between runs.
     existing_rows = _load_csv_rows()
     if existing_rows:
         print(f"\n{len(existing_rows)} existing listing(s) loaded from {OUTPUT_PATH}")
+    else:
+        _od_token = os.environ.get("APARTMENT_ONEDRIVE_REFRESH_TOKEN")
+        if _od_token:
+            print("\nNo local CSV found — downloading existing listings from OneDrive...")
+            try:
+                import pandas as pd
+                from apartment_hunter import onedrive as _onedrive
+                _df = _onedrive.download_listings(config)
+                if not _df.empty:
+                    existing_rows = {
+                        row["url"]: {k: ("" if (v is None or (isinstance(v, float) and v != v)) else str(v)) for k, v in row.items()}
+                        for _, row in _df.iterrows()
+                        if row.get("url")
+                    }
+                    print(f"  {len(existing_rows)} existing listing(s) loaded from OneDrive")
+            except Exception as e:
+                print(f"  [OneDrive] could not load existing data: {e} — starting fresh")
 
     sources_cfg = config.get("sources", {})
     all_listings = []
