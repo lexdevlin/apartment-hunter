@@ -440,38 +440,61 @@ with st.expander("🔧 Map debug info", expanded=False):
 
 
 # ---------------------------------------------------------------------------
-# Back-to-top button — injected into the parent page DOM via a hidden iframe
+# Back-to-top button — injected into the parent page DOM via a hidden iframe.
+# Uses setInterval polling rather than scroll events, which don't reliably
+# bubble across the iframe boundary in Streamlit.
 # ---------------------------------------------------------------------------
 _components.html("""
 <script>
 (function() {
   var pd = window.parent.document;
+  var pw = window.parent;
+
   var existing = pd.getElementById('apt-btt');
   if (existing) existing.remove();
 
   var btn = pd.createElement('button');
-  btn.id  = 'apt-btt';
+  btn.id = 'apt-btt';
   btn.textContent = '↑';
   btn.title = 'Back to top';
   btn.style.cssText =
-    'display:none;position:fixed;bottom:28px;right:28px;z-index:9999;' +
-    'width:40px;height:40px;border-radius:50%;border:none;' +
-    'background:#1e78dc;color:#fff;font-size:20px;line-height:40px;' +
+    'display:none;position:fixed;bottom:28px;right:28px;z-index:99999;' +
+    'width:44px;height:44px;border-radius:50%;border:none;' +
+    'background:#1e78dc;color:#fff;font-size:22px;line-height:44px;' +
     'text-align:center;cursor:pointer;' +
-    'box-shadow:0 2px 8px rgba(0,0,0,0.35);transition:opacity 0.2s;';
+    'box-shadow:0 2px 10px rgba(0,0,0,0.4);';
 
-  var scroller = pd.querySelector('[data-testid="stAppViewContainer"]')
-              || pd.querySelector('section.main')
-              || pd.body;
+  // Returns [scrollTop, scrollElement] for whichever container is actually scrolling
+  function getScroll() {
+    var candidates = [
+      pd.querySelector('[data-testid="stAppViewContainer"]'),
+      pd.querySelector('section.main'),
+      pd.documentElement,
+      pd.body
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i] && candidates[i].scrollTop > 0) {
+        return [candidates[i].scrollTop, candidates[i]];
+      }
+    }
+    return [pw.scrollY || pw.pageYOffset || 0, null];
+  }
 
-  btn.onclick = function() { scroller.scrollTo({top: 0, behavior: 'smooth'}); };
-  scroller.addEventListener('scroll', function() {
-    btn.style.display = scroller.scrollTop > 400 ? 'block' : 'none';
-  });
+  btn.onclick = function() {
+    var s = getScroll();
+    if (s[1]) { s[1].scrollTo({top: 0, behavior: 'smooth'}); }
+    else       { pw.scrollTo({top: 0, behavior: 'smooth'}); }
+  };
+
   pd.body.appendChild(btn);
+
+  // Poll every 250 ms — more reliable than cross-iframe scroll events
+  setInterval(function() {
+    btn.style.display = getScroll()[0] > 400 ? 'block' : 'none';
+  }, 250);
 })();
 </script>
-""", height=0)
+""", height=1)
 
 today_str     = datetime.utcnow().strftime("%Y-%m-%d")
 total_active  = len(all_listings)
