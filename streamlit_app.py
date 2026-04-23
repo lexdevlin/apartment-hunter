@@ -69,6 +69,10 @@ def load_listings() -> list[dict]:
         -(l.get("priority_score") or 0),
         -_date_ts(l.get("date_found")),
     ))
+    # Normalize neighborhood names for display (handles dirty Craigslist free-text)
+    for listing in data:
+        if listing.get("neighborhood"):
+            listing["neighborhood"] = _normalize_hood(listing["neighborhood"])
     return data
 
 
@@ -139,6 +143,52 @@ def _resolve_coords(address: str, neighborhood: str) -> "tuple[float, float] | N
     except Exception:
         pass
     return None
+
+
+# ---------------------------------------------------------------------------
+# Neighborhood normalization
+# ---------------------------------------------------------------------------
+
+# Maps lowercased, hyphen-stripped neighborhood strings → canonical display name.
+# Handles Craigslist free-text variants, abbreviations, and slug formats.
+_HOOD_ALIASES: dict[str, str] = {
+    "bushwick":                  "Bushwick",
+    "ridgewood":                 "Ridgewood",
+    "bedford stuyvesant":        "Bedford-Stuyvesant",
+    "bedford-stuyvesant":        "Bedford-Stuyvesant",
+    "bed stuy":                  "Bedford-Stuyvesant",
+    "bedstuy":                   "Bedford-Stuyvesant",
+    "bed-stuy":                  "Bedford-Stuyvesant",
+    "clinton hill":              "Clinton Hill",
+    "clinton-hill":              "Clinton Hill",
+    "prospect lefferts gardens": "Prospect Lefferts Gardens",
+    "prospect-lefferts-gardens": "Prospect Lefferts Gardens",
+    "prospect lefferts":         "Prospect Lefferts Gardens",
+    "plg":                       "Prospect Lefferts Gardens",
+    "williamsburg":              "Williamsburg",
+    "wburg":                     "Williamsburg",
+    "greenpoint":                "Greenpoint",
+    "east williamsburg":         "East Williamsburg",
+    "east-williamsburg":         "East Williamsburg",
+    "e williamsburg":            "East Williamsburg",
+    "crown heights":             "Crown Heights",
+    "crown-heights":             "Crown Heights",
+}
+
+
+def _normalize_hood(hood: str) -> str:
+    """
+    Normalize a raw neighborhood string to a canonical display name.
+    For slash-separated combos (e.g. "Williamsburg/Bedstuy"), picks the first
+    recognised part. Falls back to title-casing the original if no match found.
+    """
+    if not hood:
+        return hood
+    for part in re.split(r"\s*[/\\|,&]\s*", hood.strip()):
+        key = part.lower().replace("-", " ").strip()
+        if key in _HOOD_ALIASES:
+            return _HOOD_ALIASES[key]
+    return hood.strip()
 
 
 # Official MTA line colors (hex)
@@ -280,7 +330,7 @@ st.sidebar.title("🏠 Apartment Hunter")
 
 status_view = st.sidebar.radio(
     "Show listings",
-    ["Unreviewed", "Saved", "All active"],
+    ["Unreviewed", "Saved", "Skipped", "All active"],
     index=0,
 )
 
@@ -294,7 +344,10 @@ all_listings = load_listings()
 sources       = sorted({l["source"] for l in all_listings if l.get("source")})
 neighborhoods = sorted({l["neighborhood"] for l in all_listings if l.get("neighborhood")})
 
-selected_sources = st.sidebar.multiselect("Source", sources, default=sources)
+st.sidebar.markdown("**Source**")
+selected_sources = [src for src in sources
+                    if st.sidebar.checkbox(_source_label(src), value=True, key=f"src_{src}")]
+
 selected_hoods   = st.sidebar.multiselect("Neighborhood", neighborhoods, default=neighborhoods)
 
 st.sidebar.markdown("---")
@@ -319,6 +372,8 @@ def _apply_filters(listings: list[dict]) -> list[dict]:
         if status_view == "Unreviewed" and status is not None:
             continue
         if status_view == "Saved" and status != "saved":
+            continue
+        if status_view == "Skipped" and status != "skipped":
             continue
         if priority_only and not l.get("is_priority"):
             continue

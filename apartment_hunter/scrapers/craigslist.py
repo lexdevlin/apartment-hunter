@@ -615,27 +615,60 @@ def _is_unwanted(title: Optional[str]) -> bool:
 
 _BOROUGH_NAMES = {"brooklyn", "queens", "manhattan", "bronx", "staten island", "new york"}
 
+# Abbreviations and alternate spellings not directly derivable from the config list
+_HOOD_ALIASES: dict[str, str] = {
+    "bed stuy":   "bedford-stuyvesant",
+    "bedstuy":    "bedford-stuyvesant",
+    "bed-stuy":   "bedford-stuyvesant",
+    "plg":        "prospect-lefferts-gardens",
+    "east wburg": "east-williamsburg",
+    "e williamsburg": "east-williamsburg",
+    "wburg":      "williamsburg",
+}
+
+
+def _match_canonical(raw_part: str, norm_map: dict[str, str]) -> str | None:
+    """Return the canonical neighborhood name for a single raw string, or None."""
+    key = raw_part.lower().replace("-", " ").strip()
+    if key in norm_map:
+        return norm_map[key]
+    # Check hand-coded aliases
+    alias_target = _HOOD_ALIASES.get(key)
+    if alias_target:
+        alias_key = alias_target.replace("-", " ")
+        return norm_map.get(alias_key)
+    return None
+
 
 def _refine_neighborhood(listing: Listing, neighborhoods: list[str]) -> None:
     """
-    If the listing's neighborhood is a generic borough name (or unrecognised),
-    search the title for a known target neighbourhood and use that instead.
+    Normalise the listing's neighborhood to a canonical name from the config.
+
+    Steps:
+    1. Direct match (case-insensitive, hyphen-insensitive) → fix casing
+    2. Slash/comma-separated combo → pick the first recognised part
+    3. Known abbreviation aliases (bed-stuy, plg, wburg, …)
+    4. Blank or generic borough label → search title for a known neighborhood
     """
-    current = (listing.neighborhood or "").lower().replace("-", " ").strip()
-    known   = [n.lower().replace("-", " ") for n in neighborhoods]
+    current  = (listing.neighborhood or "").strip()
+    norm_map = {n.lower().replace("-", " "): n for n in neighborhoods}
 
-    # Already a recognised target neighbourhood — nothing to do
-    if current in known:
-        return
+    # Steps 1–3: try each slash/comma-separated part against canonical map + aliases
+    for part in re.split(r"\s*[/\\|,]\s*", current) if current else []:
+        match = _match_canonical(part, norm_map)
+        if match:
+            listing.neighborhood = match
+            return
 
-    # Only refine if the neighbourhood is blank or a generic borough label
-    if current and current not in _BOROUGH_NAMES:
-        return
+    # Step 4: blank or generic borough label → search title
+    current_lower = current.lower().replace("-", " ")
+    if current_lower and current_lower not in _BOROUGH_NAMES:
+        return  # Unrecognised but specific — keep as-is
 
     title_lower = (listing.title or "").lower().replace("-", " ")
-    for hood, canonical in zip(known, neighborhoods):
-        if hood in title_lower:
-            listing.neighborhood = canonical
+    for hood_norm, hood_canonical in norm_map.items():
+        if hood_norm in title_lower:
+            listing.neighborhood = hood_canonical
             return
 
 
