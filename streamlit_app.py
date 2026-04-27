@@ -243,11 +243,11 @@ def _listing_map(lat: float, lon: float) -> folium.Map:
         location=[lat, lon],
         icon=folium.DivIcon(
             html=(
-                '<div style="font-size:22px;color:#1e78dc;'
+                '<div style="font-size:33px;color:#1e78dc;'
                 'text-shadow:0 1px 3px rgba(0,0,0,0.6);line-height:1">★</div>'
             ),
-            icon_size=(22, 22),
-            icon_anchor=(11, 11),
+            icon_size=(33, 33),
+            icon_anchor=(17, 17),
         ),
         tooltip="Listing",
     ).add_to(m)
@@ -452,19 +452,18 @@ _components.html("""
     try { pw = window.parent; pd = window.parent.document; }
     catch(e) { pw = window.top;  pd = window.top.document;  }
 
-    // Clean up from previous renders
-    ['apt-btt', 'apt-sentinel'].forEach(function(id) {
+    // ── Clean up previous renders ─────────────────────────────────────────────
+    ['apt-btt', 'apt-sentinel', 'apt-lightbox'].forEach(function(id) {
       var el = pd.getElementById(id);
       if (el) el.remove();
     });
 
-    // Invisible sentinel pinned to the very top of the page
+    // ── Back-to-top ───────────────────────────────────────────────────────────
     var sentinel = pd.createElement('div');
     sentinel.id = 'apt-sentinel';
     sentinel.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none;';
     pd.body.insertBefore(sentinel, pd.body.firstChild);
 
-    // Floating button
     var btn = pd.createElement('button');
     btn.id = 'apt-btt';
     btn.textContent = '↑';
@@ -475,8 +474,6 @@ _components.html("""
       'background:#1e78dc;color:#fff;font-size:22px;line-height:44px;' +
       'text-align:center;cursor:pointer;' +
       'box-shadow:0 2px 10px rgba(0,0,0,0.4);';
-
-    // On click: find whichever element actually has scrollTop > 0 and reset it
     btn.onclick = function() {
       var best = null, bestVal = pw.scrollY || pw.pageYOffset || 0;
       pd.querySelectorAll('*').forEach(function(el) {
@@ -485,20 +482,78 @@ _components.html("""
       if (best) { best.scrollTo({top: 0, behavior: 'smooth'}); }
       else       { pw.scrollTo({top: 0, behavior: 'smooth'}); }
     };
-
     pd.body.appendChild(btn);
-
-    // IntersectionObserver: show button when sentinel scrolls out of viewport.
-    // Works regardless of which element is the actual scroll container.
     if (window.IntersectionObserver) {
       new IntersectionObserver(function(entries) {
         btn.style.display = entries[0].isIntersecting ? 'none' : 'block';
       }, { threshold: 0 }).observe(sentinel);
     }
 
-    console.log('[apt-btt] injected (IntersectionObserver)');
+    // ── Lightbox ──────────────────────────────────────────────────────────────
+    var lb = pd.createElement('div');
+    lb.id = 'apt-lightbox';
+    lb.style.cssText =
+      'display:none;position:fixed;inset:0;z-index:100000;' +
+      'background:rgba(0,0,0,0.93);align-items:center;justify-content:center;';
+    lb.innerHTML =
+      '<button id="apt-lb-x" title="Close (Esc)" style="' +
+        'position:absolute;top:16px;right:20px;background:none;border:none;' +
+        'color:#fff;font-size:32px;cursor:pointer;line-height:1;opacity:0.8;padding:4px 10px;">✕</button>' +
+      '<button id="apt-lb-prev" style="' +
+        'position:absolute;left:0;top:50%;transform:translateY(-50%);' +
+        'background:none;border:none;color:#fff;font-size:72px;' +
+        'cursor:pointer;padding:0 22px;line-height:1;opacity:0.7;user-select:none;">&#8249;</button>' +
+      '<img id="apt-lb-img" src="" alt="" style="' +
+        'max-width:90vw;max-height:85vh;object-fit:contain;' +
+        'border-radius:4px;display:block;" />' +
+      '<button id="apt-lb-next" style="' +
+        'position:absolute;right:0;top:50%;transform:translateY(-50%);' +
+        'background:none;border:none;color:#fff;font-size:72px;' +
+        'cursor:pointer;padding:0 22px;line-height:1;opacity:0.7;user-select:none;">&#8250;</button>' +
+      '<div id="apt-lb-ctr" style="' +
+        'position:absolute;bottom:18px;left:0;right:0;text-align:center;' +
+        'color:#aaa;font-size:0.85rem;pointer-events:none;"></div>';
+    pd.body.appendChild(lb);
+
+    var _lbImgs = [], _lbIdx = 0;
+
+    function _lbRender() {
+      var img  = pd.getElementById('apt-lb-img');
+      var ctr  = pd.getElementById('apt-lb-ctr');
+      var prev = pd.getElementById('apt-lb-prev');
+      var next = pd.getElementById('apt-lb-next');
+      if (img)  img.src = _lbImgs[_lbIdx] || '';
+      if (ctr)  ctr.textContent = (_lbIdx + 1) + ' of ' + _lbImgs.length;
+      if (prev) prev.style.opacity = _lbIdx === 0                ? '0.2' : '0.75';
+      if (next) next.style.opacity = _lbIdx >= _lbImgs.length-1 ? '0.2' : '0.75';
+    }
+    function _lbOpen(imgs, startIdx) {
+      _lbImgs = imgs || [];
+      _lbIdx  = startIdx || 0;
+      lb.style.display = 'flex';
+      _lbRender();
+    }
+    function _lbClose() { lb.style.display = 'none'; }
+    function _lbPrev()  { if (_lbIdx > 0)                  { _lbIdx--; _lbRender(); } }
+    function _lbNext()  { if (_lbIdx < _lbImgs.length - 1) { _lbIdx++; _lbRender(); } }
+
+    lb.onclick = function(e) { if (e.target === lb) _lbClose(); };
+    pd.getElementById('apt-lb-x').onclick    = _lbClose;
+    pd.getElementById('apt-lb-prev').onclick = function(e) { e.stopPropagation(); _lbPrev(); };
+    pd.getElementById('apt-lb-next').onclick = function(e) { e.stopPropagation(); _lbNext(); };
+    pd.addEventListener('keydown', function(e) {
+      if (lb.style.display !== 'none') {
+        if (e.key === 'Escape')     { e.preventDefault(); _lbClose(); }
+        if (e.key === 'ArrowLeft')  { e.preventDefault(); _lbPrev(); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); _lbNext(); }
+      }
+    });
+
+    pw.__aptShowLightbox = _lbOpen;
+
+    console.log('[apt-btt+lb] injected');
   } catch(e) {
-    console.error('[apt-btt] error:', e);
+    console.error('[apt-btt+lb] error:', e);
   }
 })();
 </script>
@@ -556,7 +611,7 @@ def _image_carousel(images: list[str], key: str) -> None:
     object-fit: contain;
     background: #111;
     border-radius: 6px;
-    cursor: pointer;
+    cursor: zoom-in;
   }}
   .carousel-btn {{
     position: absolute;
@@ -599,10 +654,13 @@ def _image_carousel(images: list[str], key: str) -> None:
   let idx = 0;
   const visible = 3;
 
-  imgs.forEach(function(src) {{
+  imgs.forEach(function(src, i) {{
     const img = document.createElement('img');
     img.src = src;
-    img.onclick = function() {{ window.open(src, '_blank'); }};
+    img.onclick = function() {{
+      try {{ window.parent.__aptShowLightbox(imgs, i); }}
+      catch(e) {{ window.open(src, '_blank'); }}
+    }};
     track.appendChild(img);
   }});
 
