@@ -504,7 +504,7 @@ _components.html("""
         'background:none;border:none;color:#fff;font-size:72px;' +
         'cursor:pointer;padding:0 22px;line-height:1;opacity:0.7;user-select:none;">&#8249;</button>' +
       '<img id="apt-lb-img" src="" alt="" style="' +
-        'max-width:90vw;max-height:85vh;object-fit:contain;' +
+        'width:90vw;height:85vh;object-fit:contain;' +
         'border-radius:4px;display:block;" />' +
       '<button id="apt-lb-next" style="' +
         'position:absolute;right:0;top:50%;transform:translateY(-50%);' +
