@@ -582,23 +582,52 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
             listing.rent_stabilized = True
 
     # --- Listing images ---
-    # StreetEasy embeds photo URLs as JSON inside <script> tags (React/Next.js),
-    # not as <img src> or og:image meta tags. Extract them directly from raw HTML.
-    # Always re-extract — never skip because a single stale URL is already stored.
-    # Regex broadened to [a-zA-Z0-9_-]+ — CDN hashes are nominally hex but
-    # StreetEasy has occasionally shipped mixed-case or alphanumeric variants.
+    # Tier 1: explicit -full variant — highest resolution, directly usable.
+    # Photos are embedded as URL strings in the React/RSC payload in <script>
+    # tags; searching raw HTML catches them regardless of JSON nesting depth.
     photo_urls = re.findall(
         r"https://photos\.zillowstatic\.com/fp/[a-zA-Z0-9_-]+-full\.[a-z]+",
         resp.text,
     )
     img_urls = list(dict.fromkeys(photo_urls))  # deduplicate, preserve order
-    print(f"  [StreetEasy] {listing.url.split('/')[-1]}: {len(img_urls)} photo(s) found")
-    # Fallback: any og:image meta tags (older page formats)
+    print(f"  [StreetEasy] {listing.url.split('/')[-1]}: {len(img_urls)} photo(s) found"
+          + (" (tier-1 -full)" if img_urls else ""))
+
+    # Tier 2: any zillowstatic /fp/ URL — catches thumbnail or unversioned
+    # variants when StreetEasy changes their CDN URL format.
+    # Deduplicate by base hash (strip -cc_ft_NNN or -full suffix so the same
+    # photo in multiple sizes only yields one entry).
     if not img_urls:
-        img_urls = [
+        raw_cdn = re.findall(
+            r"https://photos\.zillowstatic\.com/fp/[a-zA-Z0-9_-]+\.[a-z]+",
+            resp.text,
+        )
+        seen_bases: set[str] = set()
+        for url in raw_cdn:
+            base = re.sub(r"(?:-full|-cc_ft_\d+)(\.[a-z]+)$", r"\1", url)
+            if base not in seen_bases:
+                seen_bases.add(base)
+                img_urls.append(url)
+        if img_urls:
+            print(f"  [StreetEasy] {listing.url.split('/')[-1]}: "
+                  f"{len(img_urls)} photo(s) found (tier-2 any CDN URL)")
+
+    # Tier 3: og:image meta tags — last resort for older/simplified page formats.
+    if not img_urls:
+        raw_og = [
             m["content"] for m in soup.find_all("meta", attrs={"property": "og:image"})
             if m.get("content", "").startswith("http")
         ]
+        # Zillow CDN thumbnails embed a size token like -cc_ft_384.webp.
+        # Bump to 1536px — the CDN serves this variant for most listings.
+        img_urls = [re.sub(r"-cc_ft_\d+\.", "-cc_ft_1536.", u) for u in raw_og]
+        if img_urls:
+            print(f"  [StreetEasy] {listing.url.split('/')[-1]}: "
+                  f"{len(img_urls)} photo(s) found (tier-3 og:image)")
+
+    if not img_urls:
+        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: no photos found")
+
     if img_urls:
         listing.image_url = ",".join(img_urls[:8])
 

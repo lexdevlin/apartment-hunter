@@ -517,12 +517,23 @@ _components.html("""
 
     var _lbImgs = [], _lbIdx = 0;
 
+    function _lbUpgrade(u) {
+      return u.replace(/-cc_ft_\d+\./, '-cc_ft_1536.');
+    }
     function _lbRender() {
-      var img  = pd.getElementById('apt-lb-img');
-      var ctr  = pd.getElementById('apt-lb-ctr');
-      var prev = pd.getElementById('apt-lb-prev');
-      var next = pd.getElementById('apt-lb-next');
-      if (img)  img.src = _lbImgs[_lbIdx] || '';
+      var img    = pd.getElementById('apt-lb-img');
+      var ctr    = pd.getElementById('apt-lb-ctr');
+      var prev   = pd.getElementById('apt-lb-prev');
+      var next   = pd.getElementById('apt-lb-next');
+      var rawSrc = _lbImgs[_lbIdx] || '';
+      var hiSrc  = _lbUpgrade(rawSrc);
+      if (img) {
+        img.onerror = null;
+        img.src = hiSrc;
+        if (hiSrc !== rawSrc) {
+          img.onerror = function() { this.onerror = null; this.src = rawSrc; };
+        }
+      }
       if (ctr)  ctr.textContent = (_lbIdx + 1) + ' of ' + _lbImgs.length;
       if (prev) prev.style.opacity = _lbIdx === 0                ? '0.2' : '0.75';
       if (next) next.style.opacity = _lbIdx >= _lbImgs.length-1 ? '0.2' : '0.75';
@@ -656,7 +667,11 @@ def _image_carousel(images: list[str], key: str) -> None:
 
   imgs.forEach(function(src, i) {{
     const img = document.createElement('img');
-    img.src = src;
+    const hi = src.replace(/-cc_ft_\d+\./, '-cc_ft_1536.');
+    img.src = hi;
+    if (hi !== src) {{
+      img.onerror = function() {{ this.onerror = null; this.src = src; }};
+    }}
     img.onclick = function() {{
       try {{ window.parent.__aptShowLightbox(imgs, i); }}
       catch(e) {{ window.open(src, '_blank'); }}
