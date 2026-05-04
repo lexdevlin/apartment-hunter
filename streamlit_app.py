@@ -312,6 +312,17 @@ def _fmt_beds_baths_floor(beds, baths, floor_) -> str:
     return "  ·  ".join(parts)
 
 
+def _fmt_date_listed(date_str: str) -> str:
+    """Format a YYYY-MM-DD string as 'Mar 15, 2026'."""
+    if not date_str:
+        return ""
+    try:
+        d = datetime.strptime(date_str[:10], "%Y-%m-%d")
+        return f"{d.strftime('%b')} {d.day}, {d.year}"
+    except ValueError:
+        return ""
+
+
 _SOURCE_LABELS = {
     "streeteasy":     "StreetEasy",
     "craigslist":     "Craigslist",
@@ -769,8 +780,6 @@ else:
                     meta_parts.append(hood)
                 if score is not None:
                     meta_parts.append(f"score: {score:.0f}")
-                if date_listed:
-                    meta_parts.append(f"listed {date_listed}")
                 st.caption("  ·  ".join(meta_parts))
 
                 st.markdown(
@@ -779,7 +788,11 @@ else:
                     unsafe_allow_html=True,
                 )
 
-                detail_line = _fmt_beds_baths_floor(beds, baths, floor_)
+                detail_parts = [_fmt_beds_baths_floor(beds, baths, floor_)]
+                date_fmt = _fmt_date_listed(date_listed)
+                if date_fmt:
+                    detail_parts.append(f"Listed {date_fmt}")
+                detail_line = "  ·  ".join(p for p in detail_parts if p)
                 if detail_line:
                     st.markdown(detail_line)
                 if subway:

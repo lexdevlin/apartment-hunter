@@ -496,6 +496,7 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
         return listing
 
     if resp.status_code != 200:
+        print(f"  [StreetEasy] detail page {resp.status_code} for {listing.url.split('/')[-1]}")
         return listing
 
     soup = BeautifulSoup(resp.text, "lxml")
@@ -625,8 +626,36 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
             print(f"  [StreetEasy] {listing.url.split('/')[-1]}: "
                   f"{len(img_urls)} photo(s) found (tier-3 og:image)")
 
+    # Tier 2.5: rendered <img> / <source> tags — catches server-rendered images
+    # regardless of CDN, including any new CDN StreetEasy may have migrated to.
     if not img_urls:
-        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: no photos found")
+        _photo_cdns = (
+            "zillowstatic.com", "photos.streeteasy.com",
+            "cloudfront.net", "imgix.net",
+        )
+        for tag in soup.find_all(["img", "source"]):
+            for attr in ("src", "srcset", "data-src"):
+                raw = tag.get(attr, "")
+                for part in raw.split(","):
+                    url = part.strip().split()[0]
+                    if url.startswith("http") and any(cdn in url for cdn in _photo_cdns):
+                        img_urls.append(url)
+        img_urls = list(dict.fromkeys(img_urls))
+        if img_urls:
+            print(f"  [StreetEasy] {listing.url.split('/')[-1]}: "
+                  f"{len(img_urls)} photo(s) found (tier-2.5 img/source tags)")
+
+    if not img_urls:
+        _has_zs  = "zillowstatic.com" in resp.text
+        _has_fp  = "/fp/" in resp.text
+        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: no photos found "
+              f"(status={resp.status_code}, len={len(resp.text)}, "
+              f"zillowstatic={_has_zs}, /fp/={_has_fp})")
+        if _has_zs:
+            # CDN is present but our regexes aren't matching — show the URL context
+            idx = resp.text.lower().find("zillowstatic")
+            print(f"  [StreetEasy] zillowstatic snippet: "
+                  f"{resp.text[max(0, idx-30):idx+120]!r}")
 
     if img_urls:
         listing.image_url = ",".join(img_urls[:8])
