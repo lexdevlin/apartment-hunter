@@ -105,20 +105,34 @@ def _coerce(row: dict) -> dict:
 
     user_status is intentionally omitted — it is owned by the UI and must
     never be overwritten by the scraper.
+
+    Always-update fields (price, last_seen, priority_score, delisted) are
+    always included, even when null, so the DB stays current.
+
+    Fill-blank fields (image_url, date_listed, address, etc.) are only
+    included when non-null.  Excluding them from the payload means
+    PostgreSQL's ON CONFLICT DO UPDATE won't touch those columns, so a
+    successfully-stored value can never be accidentally cleared by a run
+    where the scraper failed to re-collect the field.
     """
-    return {
-        "url":             row.get("url", ""),
+    # Always-update: sent on every upsert regardless of value
+    result: dict = {
+        "url":            row.get("url", ""),
+        "delisted":       _bool(row.get("delisted")) or False,
+        "price":          _int(row.get("price")),
+        "last_seen":      _date(row.get("last_seen")),
+        "priority_score": _float(row.get("priority_score")),
+        "is_priority":    _bool(row.get("is_priority")),
+    }
+
+    # Fill-blank: only include when non-null to avoid overwriting existing data
+    _fill_blank = {
         "date_listed":     _date(row.get("date_listed")),
         "date_found":      _date(row.get("date_found")),
-        "delisted":        _bool(row.get("delisted")) or False,
         "source":          _str(row.get("source")),
-        "priority_score":  _float(row.get("priority_score")),
-        "is_priority":     _bool(row.get("is_priority")),
         "reviewed":        _bool(row.get("reviewed")),
-        "last_seen":       _date(row.get("last_seen")),
         "address":         _str(row.get("address")),
         "neighborhood":    _str(row.get("neighborhood")),
-        "price":           _int(row.get("price")),
         "floor":           _str(row.get("floor")),
         "bedrooms":        _int(row.get("bedrooms")),
         "bathrooms":       _float(row.get("bathrooms")),
@@ -131,6 +145,8 @@ def _coerce(row: dict) -> dict:
         "listing_id":      _str(row.get("listing_id")),
         "image_url":       _str(row.get("image_url")),
     }
+    result.update({k: v for k, v in _fill_blank.items() if v is not None})
+    return result
 
 
 # ---------------------------------------------------------------------------

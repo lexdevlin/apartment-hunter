@@ -95,18 +95,41 @@ def scrape(config: dict, existing_rows: dict | None = None) -> list[Listing]:
             print(f"  [StreetEasy] {n_deduped} duplicate URL(s) skipped for {hood}")
         time.sleep(HOOD_DELAY + random.uniform(0, 4))
 
-    # Enrich each unique listing with its detail page — skip listings already
-    # enriched in the CSV (bedrooms non-blank is the "enrichment done" signal).
-    needs_enrich = [l for l in all_listings
-                    if not _is_enriched(l.url, existing_rows)
-                    and (existing_rows.get(l.url) or {}).get("delisted", "").lower() != "true"]
-    cached       = len(all_listings) - len(needs_enrich)
-    print(f"  [StreetEasy] enriching {needs_enrich and len(needs_enrich) or 0} listing(s) via detail pages"
-          + (f" ({cached} skipped — already in CSV)" if cached else "") + "...")
+    # Enrich each unique listing with its detail page.
+    # ─ New listings (not yet in stored data) are always enriched.
+    # ─ Previously-seen listings are re-enriched if their stored row is missing
+    #   both image_url and date_listed — this heals listings where the first
+    #   detail-page fetch failed (403, timeout, regex change) or that were added
+    #   before photo/date extraction was implemented.
+    # ─ Re-enrichment of existing listings is capped per run so catch-up across
+    #   many stale rows doesn't cause excessively long scraper runs.
+    _MAX_REENRICH = 20
 
-    # Restore stored values for listings we're skipping
+    def _not_delisted(url: str) -> bool:
+        return (existing_rows.get(url) or {}).get("delisted", "").lower() != "true"
+
+    new_listings  = [l for l in all_listings
+                     if l.url not in existing_rows and _not_delisted(l.url)]
+    stale_missing = [l for l in all_listings
+                     if l.url in existing_rows
+                     and not _is_enriched(l.url, existing_rows)
+                     and _not_delisted(l.url)]
+
+    needs_enrich = new_listings + stale_missing[:_MAX_REENRICH]
+    cached       = len(all_listings) - len(needs_enrich)
+
+    _stale_msg = (f", {min(len(stale_missing), _MAX_REENRICH)}"
+                  + (f"/{len(stale_missing)}" if len(stale_missing) > _MAX_REENRICH else "")
+                  + " re-enriching stale") if stale_missing else ""
+    print(f"  [StreetEasy] enriching {len(needs_enrich)} listing(s) via detail pages"
+          f" ({len(new_listings)} new{_stale_msg})"
+          + (f"  ({cached} cached)" if cached else "") + "...")
+
+    # Restore stored values for ALL existing listings (including those being
+    # re-enriched) so bedrooms, bathrooms, address, etc. carry over even when
+    # _enrich_listing is about to update only the missing image/date fields.
     for listing in all_listings:
-        if _is_enriched(listing.url, existing_rows):
+        if listing.url in existing_rows:
             _restore_from_row(listing, existing_rows[listing.url])
 
     enrich_session = requests.Session(impersonate="chrome136")
@@ -426,13 +449,23 @@ def _parse_card(card, hood: str = "") -> Optional[Listing]:
 
 
 def _is_enriched(url: str, existing_rows: dict) -> bool:
-    """True if the URL exists in the CSV and has already been through enrichment."""
+    """True if the listing was successfully enriched from its detail page.
+
+    bedrooms is NOT a reliable sentinel — it is also extracted from the search
+    card, so a listing can have bedrooms set without the detail page ever having
+    been fetched.  We require at least one field that comes exclusively from the
+    detail page (image_url or date_listed) to confirm a successful fetch.
+    Listings missing both will be re-enriched, self-healing prior failures
+    (403, timeout, regex miss, or listings added before photo extraction).
+    """
     row = existing_rows.get(url)
     if not row:
         return False
-    # bedrooms is always set by the detail page when available — use it as the
-    # enrichment sentinel. A listing with no bedrooms field was never enriched.
-    return bool((row.get("bedrooms") or "").strip())
+    if not (row.get("bedrooms") or "").strip():
+        return False  # never been scraped at all
+    has_image = bool((row.get("image_url") or "").strip())
+    has_date  = bool((row.get("date_listed") or "").strip())
+    return has_image or has_date
 
 
 def _restore_from_row(listing: Listing, row: dict) -> None:
