@@ -144,6 +144,7 @@ def _coerce(row: dict) -> dict:
         "title":           _str(row.get("title")),
         "listing_id":      _str(row.get("listing_id")),
         "image_url":       _str(row.get("image_url")),
+        "listing_status":  _str(row.get("listing_status")),
     }
     result.update({k: v for k, v in _fill_blank.items() if v is not None})
     return result

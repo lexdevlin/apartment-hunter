@@ -509,6 +509,11 @@ def _restore_from_row(listing: Listing, row: dict) -> None:
         if _img is not None and not (isinstance(_img, float) and _img != _img):
             _img = str(_img).strip()
             listing.image_url = _img if _img.lower() not in ("nan", "none", "") else None
+    if listing.listing_status is None:
+        _ls = row.get("listing_status")
+        if _ls is not None and not (isinstance(_ls, float) and _ls != _ls):
+            _ls = str(_ls).strip()
+            listing.listing_status = _ls if _ls.lower() not in ("nan", "none", "") else None
 
 
 def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
@@ -535,33 +540,43 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     soup = BeautifulSoup(resp.text, "lxml")
     full_text = soup.get_text(" ", strip=True)
 
-    # --- Off-market detection ---
+    # --- Status badge / off-market detection ---
     # StreetEasy renders a status badge immediately after the "Report listing"
-    # control.  The first token is the definitive status:
+    # control.  The first token plus the phrase that follows give the status:
     #   live:  "Report listing  Available  Available now"   (immediate)
     #          "Report listing  Available  8/1/2026"        (future move-in)
-    #   gone:  "Report listing  Unavailable  Delisted on 5/6/2026"
+    #   off:   "Report listing  Unavailable  Delisted on 5/6/2026"
     #          "Report listing  Unavailable  Rented on <date>"
     #          "Report listing  Unavailable  Temporarily off market on <date>"
     #
-    # We key off this Available/Unavailable badge token rather than scanning for
-    # bare words like "delisted" — those also appear in the price-history table of
-    # relisted units (e.g. "Delisted by ABODE NYC LLC"), which previously
-    # false-flagged live listings as off-market and short-circuited enrichment,
-    # losing date_listed and image_url.  Falls back to dated off-market phrasings
-    # only if the badge anchor isn't found (defensive against markup changes).
+    # We classify listing.listing_status from this badge, anchoring the phrase to
+    # the badge region so "Delisted"/"Rented" mentions in the price-history table
+    # of relisted units (e.g. "Delisted by ABODE NYC LLC") don't cause false
+    # positives.  A bare-substring check previously false-flagged live listings,
+    # short-circuiting enrichment and losing date_listed + image_url.
     _body = full_text.lower()
-    _badge = re.search(r"report listing\s+(available|unavailable)\b", _body)
+    _badge = re.search(r"report listing\s+(available|unavailable)\b(.{0,45})", _body)
     if _badge:
-        _off_market = _badge.group(1) == "unavailable"
-    else:
-        _off_market = (
-            bool(re.search(r"(?:delisted|rented|temporarily off market)\s+on\s+\d", _body))
-            and "available now" not in _body
-        )
-    if _off_market:
-        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: off-market "
-              f"(badge={_badge.group(1) if _badge else 'fallback'})")
+        _word, _tail = _badge.group(1), _badge.group(2)
+        if _word == "available":
+            listing.listing_status = "available"
+        elif "temporarily off market" in _tail:
+            listing.listing_status = "temporarily_off_market"
+        elif "rented" in _tail:
+            listing.listing_status = "rented"
+        elif "delisted" in _tail:
+            listing.listing_status = "delisted"
+        else:
+            listing.listing_status = "unavailable"
+    elif re.search(r"(?:delisted|rented)\s+on\s+\d", _body) and "available now" not in _body:
+        # Fallback if the badge anchor changes (defensive against markup drift).
+        listing.listing_status = "rented" if re.search(r"rented\s+on\s+\d", _body) else "delisted"
+
+    # "Temporarily off market" listings commonly return, so they are kept ACTIVE
+    # (delisted stays False) and continue through enrichment.  Only delisted /
+    # rented / generic-unavailable are treated as off-market and short-circuited.
+    if listing.listing_status in ("delisted", "rented", "unavailable"):
+        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: off-market ({listing.listing_status})")
         listing.delisted = True
         return listing
 

@@ -323,6 +323,21 @@ def _fmt_date_listed(date_str: str) -> str:
         return ""
 
 
+# Human-readable labels for the StreetEasy listing_status badge.
+_STATUS_LABELS = {
+    "available":              "Available",
+    "temporarily_off_market": "Temporarily off market",
+    "delisted":               "Delisted",
+    "rented":                 "Rented",
+    "unavailable":            "Unavailable",
+}
+
+
+def _fmt_listing_status(status: str) -> str:
+    """Format the stored listing_status into a display label ('' if unknown)."""
+    return _STATUS_LABELS.get((status or "").strip().lower(), "")
+
+
 _SOURCE_LABELS = {
     "streeteasy":     "StreetEasy",
     "craigslist":     "Craigslist",
@@ -767,6 +782,7 @@ else:
         wd         = listing.get("washer_dryer")
         user_status = listing.get("user_status")
         date_listed = (listing.get("date_listed") or "")[:10]
+        status_fmt  = _fmt_listing_status(listing.get("listing_status"))
 
         with st.container(border=True):
             # ── Top row: details (left) + map (right) ───────────────────────
@@ -792,6 +808,8 @@ else:
                 date_fmt = _fmt_date_listed(date_listed)
                 if date_fmt:
                     detail_parts.append(f"Listed {date_fmt}")
+                if status_fmt:
+                    detail_parts.append(status_fmt)
                 detail_line = "  ·  ".join(p for p in detail_parts if p)
                 if detail_line:
                     st.markdown(detail_line)

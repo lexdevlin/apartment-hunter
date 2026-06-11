@@ -28,6 +28,8 @@ class Listing:
     date_found: datetime = field(default_factory=datetime.utcnow)
     last_seen: Optional[str] = None   # "YYYY-MM-DD" of most recent scrape where listing appeared
     delisted: bool = False            # True only when URL returned a definitive "not available" signal
+    listing_status: Optional[str] = None  # StreetEasy status badge: "available" | "temporarily_off_market"
+                                          # | "delisted" | "rented" | "unavailable" | None (unknown)
     priority_score: Optional[float] = None  # 0–100, computed each run; None until first scored
     is_priority: bool = False
     reviewed: bool = False
@@ -80,6 +82,7 @@ class Listing:
             "date_found": _fmt_datetime(self.date_found),
             "last_seen": self.last_seen,
             "delisted": self.delisted or None,
+            "listing_status": self.listing_status,
             "priority_score": self.priority_score,
             "url": self.url,
             "is_priority": self.is_priority,
@@ -94,6 +97,7 @@ EXCEL_COLUMNS = [
     "date_listed",
     "date_found",
     "delisted",
+    "listing_status",
     "source",
     "priority_score",
     "is_priority",

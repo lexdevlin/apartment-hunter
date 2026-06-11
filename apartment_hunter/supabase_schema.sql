@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS listings (
     date_found         TIMESTAMPTZ,                    -- when our scraper first saw this listing
     last_seen          TIMESTAMPTZ,                    -- most recent scrape run that found this listing
     delisted           BOOLEAN     DEFAULT FALSE,      -- TRUE = confirmed gone (404/410 or gone-pattern match)
+    listing_status     TEXT,                           -- StreetEasy badge: 'available' | 'temporarily_off_market' | 'delisted' | 'rented' | 'unavailable'
     priority_score     REAL,                           -- 0–100 computed each run
     is_priority        BOOLEAN     DEFAULT FALSE,
     reviewed           BOOLEAN     DEFAULT FALSE,      -- TRUE = user has reviewed this listing
@@ -43,8 +44,9 @@ CREATE TABLE IF NOT EXISTS listings (
 );
 
 -- ============================================================
--- If you already ran the schema without image_url, add the column:
+-- If you already ran the schema before these columns existed, add them:
 --   ALTER TABLE listings ADD COLUMN IF NOT EXISTS image_url TEXT;
+--   ALTER TABLE listings ADD COLUMN IF NOT EXISTS listing_status TEXT;
 -- ============================================================
 
 -- ============================================================

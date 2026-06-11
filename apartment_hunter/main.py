@@ -106,7 +106,10 @@ def _load_csv_rows() -> dict[str, dict]:
 # Fields never overwritten when updating an existing row
 _NEVER_OVERWRITE = {"listing_id", "date_found", "reviewed", "delisted"}
 # Fields always refreshed even if the existing row already has a value
-_ALWAYS_UPDATE   = {"price", "last_seen", "priority_score"}
+# (listing_status reflects the live StreetEasy badge — must track changes like
+# available → temporarily_off_market; only refreshed when the new value is non-blank,
+# so a non-re-enriched cached row keeps its restored status rather than being blanked).
+_ALWAYS_UPDATE   = {"price", "last_seen", "priority_score", "listing_status"}
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +610,11 @@ def main():
                     if enriched.image_url != row.get("image_url"):
                         row["image_url"] = enriched.image_url
                         changed = True
+                # listing_status: always refresh to track live badge changes
+                # (e.g. available → temporarily_off_market), never fill-blank.
+                if enriched.listing_status and enriched.listing_status != row.get("listing_status"):
+                    row["listing_status"] = enriched.listing_status
+                    changed = True
                 _patch("title",           enriched.title)
 
                 if changed and not enriched.delisted:
