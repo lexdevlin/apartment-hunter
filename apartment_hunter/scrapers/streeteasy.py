@@ -536,22 +536,32 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     full_text = soup.get_text(" ", strip=True)
 
     # --- Off-market detection ---
-    # StreetEasy shows an "Unavailable" badge with "Delisted on MM/DD/YYYY" or
-    # "Rented on MM/DD/YYYY" on the detail page of units no longer available;
-    # the active badge reads "Available  Available now".
+    # StreetEasy renders a status badge immediately after the "Report listing"
+    # control.  The first token is the definitive status:
+    #   live:  "Report listing  Available  Available now"   (immediate)
+    #          "Report listing  Available  8/1/2026"        (future move-in)
+    #   gone:  "Report listing  Unavailable  Delisted on 5/6/2026"
+    #          "Report listing  Unavailable  Rented on <date>"
+    #          "Report listing  Unavailable  Temporarily off market on <date>"
     #
-    # We match the DATED badge form ("delisted on <date>" / "rented on <date>"),
-    # NOT the bare words — "Delisted"/"Rented" also appear in the price-history
-    # table of relisted units (e.g. "Delisted by ABODE NYC LLC" or a past
-    # "Rented" event).  The old bare-substring check false-flagged available
-    # listings as off-market and returned here early, which skipped date_listed
-    # and image_url extraction — leaving those rows with neither.  A positive
-    # "available now" badge always wins over stray history mentions.
+    # We key off this Available/Unavailable badge token rather than scanning for
+    # bare words like "delisted" — those also appear in the price-history table of
+    # relisted units (e.g. "Delisted by ABODE NYC LLC"), which previously
+    # false-flagged live listings as off-market and short-circuited enrichment,
+    # losing date_listed and image_url.  Falls back to dated off-market phrasings
+    # only if the badge anchor isn't found (defensive against markup changes).
     _body = full_text.lower()
-    _is_available = "available now" in _body
-    _off_market = None if _is_available else re.search(r"(?:delisted|rented)\s+on\s+\d", _body)
+    _badge = re.search(r"report listing\s+(available|unavailable)\b", _body)
+    if _badge:
+        _off_market = _badge.group(1) == "unavailable"
+    else:
+        _off_market = (
+            bool(re.search(r"(?:delisted|rented|temporarily off market)\s+on\s+\d", _body))
+            and "available now" not in _body
+        )
     if _off_market:
-        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: off-market ({_off_market.group(0)!r})")
+        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: off-market "
+              f"(badge={_badge.group(1) if _badge else 'fallback'})")
         listing.delisted = True
         return listing
 
