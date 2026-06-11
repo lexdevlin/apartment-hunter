@@ -116,33 +116,31 @@ def _load_stations() -> list[dict]:
 def _resolve_coords(address: str, neighborhood: str) -> "tuple[float, float] | None":
     """
     Look up (lat, lon) for a listing:
-      1. Geocode cache (address|neighborhood key — same format as subway.py)
-      2. Live Nominatim call as fallback
+      1. Geocode cache — exact 'address|neighborhood' key, then any key with the
+         same address (the stored neighborhood may differ from the display-
+         normalized one, e.g. "PLG: ..." vs "Prospect Lefferts Gardens").
+      2. Live geocode via subway._geocode — shares the scraper's logic, including
+         the Overpass intersection fallback for cross-street addresses that
+         Nominatim can't place ("Midwood St near Kingston Ave").
     """
-    cache = _load_geocode_cache()
-    key = f"{address}|{neighborhood}" if address and neighborhood else (address or "")
-    if key in cache and cache[key]:
-        return tuple(cache[key])
-
-    # Strip unit number before geocoding
-    clean = re.sub(r"\s*#\S+$", "", address or "").strip()
-    if not clean:
+    addr = (address or "").strip()
+    if not addr:
         return None
-    query = clean if re.search(r"\bNY\b|\bBrooklyn\b", clean, re.IGNORECASE) \
-        else f"{clean}, Brooklyn, NY"
+
+    cache = _load_geocode_cache()
+    key = f"{addr}|{neighborhood}" if neighborhood else addr
+    if cache.get(key):
+        return tuple(cache[key])
+    prefix = f"{addr}|"
+    for k, v in cache.items():
+        if v and k.startswith(prefix):
+            return tuple(v)
+
     try:
-        resp = _requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": query, "format": "json", "limit": 1},
-            headers={"User-Agent": "apartment-hunter-app/1.0"},
-            timeout=5,
-        )
-        data = resp.json()
-        if data:
-            return float(data[0]["lat"]), float(data[0]["lon"])
+        from apartment_hunter import subway
+        return subway._geocode(addr, neighborhood)
     except Exception:
-        pass
-    return None
+        return None
 
 
 # ---------------------------------------------------------------------------

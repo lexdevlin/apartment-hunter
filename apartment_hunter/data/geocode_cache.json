@@ -655,16 +655,10 @@
     40.7063094,
     -73.9367884
   ],
-  "Central Ave near Bleecker St. & Menahan St.|Bushwick, short walk from Kickerbocker M": null,
-  "Harman St. near Knickerbocker ave and Irving Ave|Bushwick, short walk from L & M train lines": null,
-  "61st near 70th Ave|Park Slope": null,
-  "559 Seneca Ave near Menahan St|Ridgewood": null,
   "65 grand Ave|PRATT/CLINTON HILL": [
     40.7232972,
     -73.9008504
   ],
-  "342 Rutland Avenue near Nostrand Avenue|Prospect Lefferts Gardens": null,
-  "294 Harman Street near Knickerbocker|Bushwick": null,
   "709 Hart Street #3C|Bushwick": [
     40.6996041,
     -73.9252951
@@ -1041,7 +1035,6 @@
     40.6724495,
     -73.9270706
   ],
-  "Ideally situated near Myrtle Avenue & Fresh Pond Road|glendale/ridgewood": null,
   "1283 Nostrand Ave, #2R|Prospect Lefferts Gardens": [
     40.6557737,
     -73.9498518
@@ -1050,7 +1043,6 @@
     40.7016651,
     -73.9139016
   ],
-  "62nd st near 70th Ave|Park Slope": null,
   "1772 Bergen St|crown-heights": [
     40.6744504,
     -73.9233782
@@ -1359,8 +1351,6 @@
     40.673891,
     -73.9081267
   ],
-  "64 place near MYRTLE AVE|RIDGEWOOD": null,
-  "62nd st near 70th Ave|Ridgewood": null,
   "1066 Putnam ave|Bushwick": [
     40.6899551,
     -73.9169241
@@ -1565,7 +1555,6 @@
     40.6776294,
     -73.9507176
   ],
-  "903 Saint Johns Place near Nostrand Avenue|crown-heights": null,
   "196 Wilson Avenue #1M|Bushwick": [
     40.699106,
     -73.923097
@@ -1846,12 +1835,10 @@
     40.6757761,
     -73.9534698
   ],
-  "building on Midwood Street & Kingston ave|Crown Heights": null,
   "1598 Eastern Parkway, #3C|Crown Heights": [
     40.66974,
     -73.94805
   ],
-  "Nearby subway st & ions|Crown Heights": null,
   "1114 Halsey St, #3R|Bushwick": [
     40.6891554,
     -73.9115486
@@ -1859,5 +1846,293 @@
   "483 evergreen avenue|Bushwick": [
     40.6912445,
     -73.9169921
+  ],
+  "Norman Ave near Manhattan Ave|Greenpoint": [
+    40.7257245,
+    -73.9518186
+  ],
+  "Herkimer st near Saratoga Ave|bushwick": [
+    40.677824,
+    -73.916354
+  ],
+  "Halsey st near Irving Ave|Bushwick": [
+    40.6943537,
+    -73.9068458
+  ],
+  "Eastern Parkway near Buffalo|Crown Heights": [
+    40.6687462,
+    -73.9254022
+  ],
+  "Park place near Buffalo ave|Crown Heights Weeksville": [
+    40.6717254,
+    -73.9253604
+  ],
+  "Harman St. near Knickerbocker ave and Irving Ave|Bushwick, short walk from L & M train lines": [
+    40.699392,
+    -73.919377
+  ],
+  "Central Ave near Madison St|Bushwick": [
+    40.692594,
+    -73.915505
+  ],
+  "central near myrtle|bushwick": [
+    40.6979465,
+    -73.9266436
+  ],
+  "Himrod St near Knickerbocker Ave|Bushwick": [
+    40.69982,
+    -73.920127
+  ],
+  "Bergen Street near nostrand|crown-heights": [
+    40.6756946,
+    -73.9500394
+  ],
+  "Bleecker St near Myrtle Ave|bushwick": [
+    40.698898,
+    -73.9175228
+  ],
+  "St Marks Ave near Rogers Ave|crown-heights": [
+    40.6756662,
+    -73.9526735
+  ],
+  "St Marks ave near Buffalo ave|Crown Heights": [
+    40.6737773,
+    -73.9246409
+  ],
+  "Park Pl near Rochester ave|crown-heights": [
+    40.672211,
+    -73.928014
+  ],
+  "Suydam Street near Myrtle Ave|bushwick": [
+    40.6976474,
+    -73.9299001
+  ],
+  "Evergreen Ave near Madison St|Bushwick": [
+    40.6912303,
+    -73.916912
+  ],
+  "Halsey St near Evergreen Ave|Bushwick": [
+    40.6887667,
+    -73.9121754
+  ],
+  "Madison Street near Ralph|Bedford Stuyvesant, Stuyvesant Heights": [
+    40.6875122,
+    -73.9237404
+  ],
+  "Pacific St near Eastern Parkway|Ocean Hill Crown Heights": [
+    40.6768642,
+    -73.9332193
+  ],
+  "Atlantic Ave near Kingston Ave|crown-heights": [
+    40.6784046,
+    -73.9412894
+  ],
+  "Stockholm near Wilson|bushwick": [
+    40.6993123,
+    -73.9230514
+  ],
+  "Stanhope St near Stanhope St & Knickerbocker Ave|bushwick": [
+    40.697299,
+    -73.923776
+  ],
+  "Granite St near Bushwick Ave|bushwick": [
+    40.68323,
+    -73.907126
+  ],
+  "Manhattan Avenue near Montrose Ave|williamsburg": [
+    40.7071648,
+    -73.9443794
+  ],
+  "Prospect Pl near Saratoga Ave|crown-heights": [
+    40.672499,
+    -73.916857
+  ],
+  "Rochester ave near Lincoln pl|crown-heights": [
+    40.669588,
+    -73.928261
+  ],
+  "Hawthorne St near Bedford Ave.|prospect-lefferts-gardens": [
+    40.657454,
+    -73.956558
+  ],
+  "Manhattan Ave near Montrose Ave|Williamsburg @  Montrose L": [
+    40.7071648,
+    -73.9443794
+  ],
+  "Wyckoff near grove|bushwick": [
+    40.7005692,
+    -73.9130974
+  ],
+  "Broadway near Melrose St|bushwick": [
+    40.6973965,
+    -73.9360264
+  ],
+  "Union st near Sutter Ave|Crown Heights - Brooklyn": [
+    40.6654903,
+    -73.921368
+  ],
+  "Atlantic ave near Albany|crown-heights": [
+    40.6774918,
+    -73.9387266
+  ],
+  "Nostrand Ave near Snyder Ave|prospect-lefferts-gardens": [
+    40.6486319,
+    -73.9494306
+  ],
+  "Harman st near Knickerbocker Ave|bushwick": [
+    40.699392,
+    -73.919377
+  ],
+  "Broadway near Willoughby Ave|bushwick": [
+    40.6959823,
+    -73.9333293
+  ],
+  "Clarendon Rd near East 28th St|prospect-lefferts-gardens": [
+    40.643127,
+    -73.950665
+  ],
+  "Bergen St near classon ave|crown-heights": [
+    40.6776522,
+    -73.959427
+  ],
+  "Sterling Pl near Nostrand Av|crown-heights": [
+    40.67253,
+    -73.950251
+  ],
+  "Lexington Ave near Patchen Ave|bedford-stuyvesant": [
+    40.690368,
+    -73.9275559
+  ],
+  "Wilson ave near Cooper st|Bushwick - Brooklyn": [
+    40.6894004,
+    -73.905952
+  ],
+  "Buffalo Ave near Atlantic Ave|Weeksville": [
+    40.6771967,
+    -73.9247628
+  ],
+  "Bushwick Ave near Furman Ave|bushwick": [
+    40.6834282,
+    -73.905547
+  ],
+  "Cooper Street near Bushwick Ave|bushwick": [
+    40.6894004,
+    -73.905952
+  ],
+  "Sterling Pl near new york ave|crown-heights": [
+    40.6726313,
+    -73.94739
+  ],
+  "Albany Ave near Bergen St|Crown Heights - 2 3 4 5 A C Trains": [
+    40.6754912,
+    -73.9388394
+  ],
+  "Rochester Ave near Park Pl|crown-heights": [
+    40.672211,
+    -73.928014
+  ],
+  "Division near Berry|williamsburg": [
+    40.7072532,
+    -73.966248
+  ],
+  "Drew st near Dumont Ave|bushwick": [
+    40.6707772,
+    -73.8613214
+  ],
+  "Putnam near Wyckoff|ridgewood": [
+    40.6983872,
+    -73.9087297
+  ],
+  "SARATOGA AVE near BERGEN ST|crown-heights": [
+    40.6742375,
+    -73.9165521
+  ],
+  "Bedford Ave near Lenox Rd|prospect-lefferts-gardens": [
+    40.653777,
+    -73.956164
+  ],
+  "Graham Avenue near Moore St|williamsburg": [
+    40.7037702,
+    -73.9426206
+  ],
+  "hancock st near irving av|bushwick": [
+    40.6954082,
+    -73.9080558
+  ],
+  "Grandview Ave near Greene ave|ridgewood": [
+    40.7097055,
+    -73.9078711
+  ],
+  "Bergen St near Ralph Ave|bedford-stuyvesant": [
+    40.6742602,
+    -73.9221475
+  ],
+  "Stanhope near Wyckoff Ave|bushwick": [
+    40.703168,
+    -73.9175056
+  ],
+  "Bergen near Franklin|crown-heights": [
+    40.6769216,
+    -73.9557679
+  ],
+  "Lincoln Place near Nostrand Avenue|crown-heights": [
+    40.670748,
+    -73.950418
+  ],
+  "Lexington near Patchen|bushwick": [
+    40.6904069,
+    -73.9276913
+  ],
+  "Thames St near Varick Ave|east-williamsburg": [
+    40.7057506,
+    -73.926645
+  ],
+  "Sterling Pl near new york|crown-heights": [
+    40.6726313,
+    -73.94739
+  ],
+  "Carroll near Troy|crown-heights": [
+    40.666691,
+    -73.9368088
+  ],
+  "Rochester Ave near Sterling Pl|crown-heights": [
+    40.6712888,
+    -73.9282438
+  ],
+  "Hart st near Wilson Ave|bushwick": [
+    40.700056,
+    -73.924582
+  ],
+  "Norman Ave near Manhattan Ave|greenpoint": [
+    40.7257245,
+    -73.9518186
+  ],
+  "Lefferts ave near Washington ave|clinton-hill": [
+    40.6619925,
+    -73.961031
+  ],
+  "Atlantic ave near Albany|bushwick": [
+    40.6774918,
+    -73.9387266
+  ],
+  "Central Ave near Bleecker St. & Menahan St.|Bushwick, short walk from Kickerbocker M": [
+    40.695587,
+    -73.920767
+  ],
+  "Weirfield Street near Bushwick Ave|Bushwick": [
+    40.687507,
+    -73.914642
+  ],
+  "Bergen St near Rockaway ave|Crown heights LIRR/S/A/C trains": [
+    40.6739907,
+    -73.9111485
+  ],
+  "Throop Ave near Willoughby Ave|bedford-stuyvesant": [
+    40.694559,
+    -73.9432344
+  ],
+  "Midwood St near KINGSTON AVE|PLG: Prospect Lefferts Gardens": [
+    40.66061,
+    -73.942611
   ]
 }

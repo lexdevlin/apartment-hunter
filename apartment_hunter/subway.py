@@ -279,28 +279,125 @@ def _nominatim(query: str, verbose: bool, label: str) -> Optional[tuple[float, f
         return None
 
 
+# Separators that signal a cross-street intersection: & / and / / / near / at / @
+# "near" and "at" are common in Craigslist map addresses ("Midwood St near Kingston Ave");
+# without them such listings were misclassified as un-geocodeable and skipped entirely.
+_INTERSECTION_RE = re.compile(r"\s+(?:&|and|/|near|at)\s+|\s*@\s*", re.IGNORECASE)
+
+
 def _is_intersection(address: str) -> bool:
     """True if address looks like a cross-street intersection rather than a numbered address."""
-    return bool(re.search(r"\s+(?:&|and|/)\s+", address, re.IGNORECASE))
+    return bool(_INTERSECTION_RE.search(address))
+
+
+def _resolve_borough(neighborhood: Optional[str]) -> str:
+    """Best-effort borough for a (possibly dirty) neighborhood string.
+
+    Scans for any known neighborhood slug as a substring so free-text values
+    like "PLG: Prospect Lefferts Gardens" still resolve to "Brooklyn".
+    Falls back to "New York" (city-wide) when nothing matches.
+    """
+    n = (neighborhood or "").lower().replace("-", " ")
+    for slug, boro in _NEIGHBORHOOD_BOROUGH.items():
+        if slug.replace("-", " ") in n:
+            return boro
+    return "New York"
+
+
+# Trailing street-type abbreviations → full form, so OSM name matching works.
+_STREET_ABBREV = {
+    "st": "Street", "str": "Street", "ave": "Avenue", "av": "Avenue",
+    "blvd": "Boulevard", "rd": "Road", "pl": "Place", "dr": "Drive",
+    "pkwy": "Parkway", "ln": "Lane", "ct": "Court", "ter": "Terrace",
+    "hwy": "Highway",
+}
+
+
+def _expand_street(name: str) -> str:
+    """Expand a trailing street-type abbreviation: 'Midwood St' → 'Midwood Street'."""
+    toks = name.strip().rstrip(".").split()
+    if toks:
+        last = toks[-1].lower().rstrip(".")
+        if last in _STREET_ABBREV:
+            toks[-1] = _STREET_ABBREV[last]
+    return " ".join(toks)
+
+
+# Overpass (OpenStreetMap) — used to resolve street intersections, which
+# Nominatim does not geocode reliably.
+_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+
+def _overpass_intersection(
+    street1: str, street2: str, area: str, verbose: bool = False
+) -> Optional[tuple[float, float]]:
+    """Resolve the (lat, lon) of the node where two named streets cross, via Overpass.
+
+    Name match is case-insensitive and anchored, scoped to the given area
+    (borough or city). Returns None if no shared node is found.
+    """
+    def _esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+
+    q = (
+        "[out:json][timeout:25];"
+        f'area["name"="{_esc(area)}"]["admin_level"~"5|6|7"]->.b;'
+        f'way(area.b)[highway]["name"~"^{_esc(street1)}$",i]->.a;'
+        f'way(area.b)[highway]["name"~"^{_esc(street2)}$",i]->.c;'
+        "node(w.a)(w.c);out 1;"
+    )
+    if verbose:
+        print(f"    overpass: {street1!r} × {street2!r} in {area!r}")
+    # Overpass's public instance rate-limits (HTTP 429) and occasionally times
+    # out under load; retry transient failures with backoff so a throttled
+    # request isn't misread as "no such intersection".
+    for attempt in range(3):
+        try:
+            resp = requests.get(
+                _OVERPASS_URL, params={"data": q},
+                headers={"User-Agent": "apartment-hunter/1.0"}, timeout=40,
+            )
+            if resp.status_code in (429, 502, 503, 504):
+                raise requests.HTTPError(f"transient {resp.status_code}")
+            resp.raise_for_status()
+            nodes = [e for e in resp.json().get("elements", []) if e.get("type") == "node"]
+            if nodes:
+                lat, lon = float(nodes[0]["lat"]), float(nodes[0]["lon"])
+                if verbose:
+                    print(f"    → ({lat:.5f}, {lon:.5f})")
+                return lat, lon
+            if verbose:
+                print("    → no intersection node found")
+            return None   # definitive: query ran, no shared node
+        except Exception as e:
+            if verbose:
+                print(f"    → overpass attempt {attempt + 1} failed: {e}")
+            if attempt < 2:
+                time.sleep(3 + attempt * 4)
+    return None
 
 
 def _geocode(address: str, neighborhood: Optional[str], verbose: bool = False) -> Optional[tuple[float, float]]:
     """
-    Returns (lat, lon) using Nominatim (OpenStreetMap).
+    Returns (lat, lon) for a listing address.
 
     Handles two address forms:
-      - Numbered: "304 Evergreen Ave #3R" → strip unit, normalise, geocode
-      - Intersection: "Myrtle Ave & Broadway" → geocode as-is (Nominatim supports intersections)
+      - Numbered: "304 Evergreen Ave #3R" → strip unit, normalise, Nominatim
+      - Intersection: "Midwood St near Kingston Ave" → normalise separators, then
+        Nominatim; if that fails (it rarely geocodes intersections), resolve the
+        actual crossing node via Overpass.
 
     Query strategy (stops at first hit):
-      1. address + neighborhood + borough, NY
-      2. address + borough, NY  (fallback if #1 returns nothing)
+      1. address + neighborhood + borough, NY   (Nominatim)
+      2. address + borough, NY                   (Nominatim fallback)
+      3. Overpass intersection node              (intersections only)
     """
-    borough = _NEIGHBORHOOD_BOROUGH.get((neighborhood or "").lower(), "New York City")
+    borough = _resolve_borough(neighborhood)
     neighborhood_label = (neighborhood or "").replace("-", " ").title()
 
-    if _is_intersection(address):
-        # Normalise all intersection separators to "&" for Nominatim
+    is_intersection = _is_intersection(address)
+    if is_intersection:
+        # Normalise all intersection separators to "&"
         street = re.sub(r"\s*/\s*|\s+and\s+|\s+near\s+|\s+at\s+|\s*@\s*", " & ", address.strip(), flags=re.IGNORECASE)
     else:
         # Strip unit designator then normalise street name
@@ -316,6 +413,19 @@ def _geocode(address: str, neighborhood: Optional[str], verbose: bool = False) -
     q2 = f"{street}, {borough}, NY"
     if q2 != q1:
         coords = _nominatim(q2, verbose, "borough fallback")
+    if coords:
+        return coords
+
+    # Intersection fallback: Nominatim couldn't place it — ask Overpass for the
+    # node where the two streets actually cross. Use the first two streets when
+    # the text lists more than two (e.g. "X near Y and Z").
+    if is_intersection:
+        parts = [p.strip() for p in street.split("&") if p.strip()]
+        if len(parts) >= 2:
+            time.sleep(_GEOCODE_SLEEP)
+            coords = _overpass_intersection(
+                _expand_street(parts[0]), _expand_street(parts[1]), borough, verbose
+            )
     return coords
 
 
