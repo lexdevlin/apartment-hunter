@@ -516,6 +516,35 @@ def _restore_from_row(listing: Listing, row: dict) -> None:
             listing.listing_status = _ls if _ls.lower() not in ("nan", "none", "") else None
 
 
+def classify_status(body_lower: str) -> Optional[str]:
+    """Classify a StreetEasy detail page's status from its "Report listing" badge.
+
+    Returns one of: "available" | "temporarily_off_market" | "delisted" |
+    "rented" | "unavailable" | None (badge not found).
+
+    The badge token is anchored to the "Report listing" control so that
+    "Delisted"/"Rented" mentions elsewhere on the page (e.g. the price-history
+    table of relisted units) don't produce false positives.  Shared by the
+    enrichment step and the gone-check in main.py so both classify identically.
+    """
+    m = re.search(r"report listing\s+(available|unavailable)\b(.{0,45})", body_lower)
+    if m:
+        word, tail = m.group(1), m.group(2)
+        if word == "available":
+            return "available"
+        if "temporarily off market" in tail:
+            return "temporarily_off_market"
+        if "rented" in tail:
+            return "rented"
+        if "delisted" in tail:
+            return "delisted"
+        return "unavailable"
+    # Fallback if the badge anchor changes (defensive against markup drift).
+    if re.search(r"(?:delisted|rented)\s+on\s+\d", body_lower) and "available now" not in body_lower:
+        return "rented" if re.search(r"rented\s+on\s+\d", body_lower) else "delisted"
+    return None
+
+
 def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     """
     Fetch the listing's detail page and backfill any fields that were absent
@@ -554,23 +583,7 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
     # of relisted units (e.g. "Delisted by ABODE NYC LLC") don't cause false
     # positives.  A bare-substring check previously false-flagged live listings,
     # short-circuiting enrichment and losing date_listed + image_url.
-    _body = full_text.lower()
-    _badge = re.search(r"report listing\s+(available|unavailable)\b(.{0,45})", _body)
-    if _badge:
-        _word, _tail = _badge.group(1), _badge.group(2)
-        if _word == "available":
-            listing.listing_status = "available"
-        elif "temporarily off market" in _tail:
-            listing.listing_status = "temporarily_off_market"
-        elif "rented" in _tail:
-            listing.listing_status = "rented"
-        elif "delisted" in _tail:
-            listing.listing_status = "delisted"
-        else:
-            listing.listing_status = "unavailable"
-    elif re.search(r"(?:delisted|rented)\s+on\s+\d", _body) and "available now" not in _body:
-        # Fallback if the badge anchor changes (defensive against markup drift).
-        listing.listing_status = "rented" if re.search(r"rented\s+on\s+\d", _body) else "delisted"
+    listing.listing_status = classify_status(full_text.lower())
 
     # "Temporarily off market" listings commonly return, so they are kept ACTIVE
     # (delisted stays False) and continue through enrichment.  Only delisted /

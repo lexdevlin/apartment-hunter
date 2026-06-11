@@ -152,7 +152,25 @@ _GONE_HEADERS = {
 }
 
 
-def _is_gone(url: str, source: str, verbose: bool = False) -> bool:
+def _warmed_streeteasy_session():
+    """A curl_cffi session warmed against the StreetEasy homepage.
+
+    StreetEasy's bot scorer 403s (or serves a content-light 200 to) cold sessions
+    hitting a listing permalink directly.  A homepage GET first acquires the
+    zguid / zgsession cookies that make subsequent permalink requests succeed —
+    the same trick the scraper uses.
+    """
+    sess = requests.Session(impersonate="chrome136")
+    sess.headers.update(streeteasy.HEADERS)
+    try:
+        sess.get("https://streeteasy.com/", timeout=15)
+        time.sleep(random.uniform(1.0, 2.0))
+    except requests.RequestsError:
+        pass
+    return sess
+
+
+def _is_gone(url: str, source: str, verbose: bool = False, session=None) -> bool:
     """
     Return True only when we have a definitive signal that the listing is gone.
     Return False on any ambiguous result (403, timeout, network error).
@@ -160,6 +178,9 @@ def _is_gone(url: str, source: str, verbose: bool = False) -> bool:
     Status codes treated as definitive:
       404 — standard "not found"
       410 — "Gone" (used by Craigslist for deleted posts)
+
+    `session`: an optional pre-warmed StreetEasy session to reuse across a batch
+    (see _check_gone_listings).  One is created and warmed on demand otherwise.
     """
     # Craigslist pseudo-URLs (/apa/?ll=...) are lat/lng search keys, not post
     # permalinks — they always 404 and tell us nothing about the listing.
@@ -168,9 +189,16 @@ def _is_gone(url: str, source: str, verbose: bool = False) -> bool:
             print("      → skipped (Craigslist pseudo-URL, not a real post permalink)")
         return False
 
+    # StreetEasy 403s minimal/non-session requests and only serves the page to a
+    # warmed browser-like session — without this the gone-check could never
+    # confirm a StreetEasy listing as off-market (it read every 403 as "ambiguous").
     try:
-        resp = requests.get(url, headers=_GONE_HEADERS, timeout=10, allow_redirects=True,
-                            impersonate="chrome136")
+        if source == "streeteasy":
+            sess = session if session is not None else _warmed_streeteasy_session()
+            resp = sess.get(url, timeout=15, allow_redirects=True)
+        else:
+            resp = requests.get(url, headers=_GONE_HEADERS, timeout=10, allow_redirects=True,
+                                impersonate="chrome136")
     except requests.RequestsError as e:
         if verbose:
             print(f"      network error: {e}")
@@ -190,6 +218,21 @@ def _is_gone(url: str, source: str, verbose: bool = False) -> bool:
         if verbose:
             print(f"      → ambiguous ({resp.status_code}) — not flagging")
         return False
+
+    # StreetEasy: classify via the status badge (same logic as enrichment) rather
+    # than bare substrings — "delisted"/"rented" also appear in the price-history
+    # table of relisted-but-live units.  "Temporarily off market" is kept active.
+    # classify_status expects tag-stripped text (the badge spans multiple tags in
+    # raw HTML), so parse with BeautifulSoup first, matching the enrichment path.
+    if source == "streeteasy":
+        from bs4 import BeautifulSoup
+        text = BeautifulSoup(resp.text, "lxml").get_text(" ", strip=True).lower()
+        status = streeteasy.classify_status(text)
+        gone = status in ("delisted", "rented", "unavailable")
+        if verbose:
+            print(f"      → status badge: {status or 'unknown'} "
+                  f"({'GONE' if gone else 'still live'})")
+        return gone
 
     body = resp.text.lower()
     patterns = _GONE_PATTERNS.get(source, [])
@@ -222,6 +265,13 @@ def _check_gone_listings(unseen_rows: list[dict], verbose: bool = False) -> int:
               + (f"({already} already delisted, " if already else "(")
               + f"{checkable} to check)")
 
+    # One warmed StreetEasy session reused across the batch (warms up only if
+    # there is at least one StreetEasy listing to check).
+    se_session = None
+    if any(r.get("source") == "streeteasy" and r.get("delisted", "").lower() != "true"
+           for r in unseen_rows):
+        se_session = _warmed_streeteasy_session()
+
     newly_gone = 0
     for row in unseen_rows:
         url    = row.get("url", "")
@@ -231,7 +281,8 @@ def _check_gone_listings(unseen_rows: list[dict], verbose: bool = False) -> int:
 
         if verbose:
             print(f"  [{source}] last_seen={row.get('last_seen', '?')}  {url[:80]}")
-        gone = _is_gone(url, source, verbose=verbose)
+        gone = _is_gone(url, source, verbose=verbose,
+                        session=se_session if source == "streeteasy" else None)
         if gone:
             row["delisted"] = "True"
             newly_gone += 1
