@@ -453,10 +453,10 @@ def _is_enriched(url: str, existing_rows: dict) -> bool:
 
     bedrooms is NOT a reliable sentinel — it is also extracted from the search
     card, so a listing can have bedrooms set without the detail page ever having
-    been fetched.  We require at least one field that comes exclusively from the
-    detail page (image_url or date_listed) to confirm a successful fetch.
-    Listings missing both will be re-enriched, self-healing prior failures
-    (403, timeout, regex miss, or listings added before photo extraction).
+    been fetched.  We require BOTH fields that come exclusively from the detail
+    page (image_url AND date_listed) to confirm a successful fetch.  Listings
+    missing either will be re-enriched, self-healing prior failures (403, timeout,
+    regex miss, or listings added before photo/date extraction was implemented).
     """
     row = existing_rows.get(url)
     if not row:
@@ -465,7 +465,7 @@ def _is_enriched(url: str, existing_rows: dict) -> bool:
         return False  # never been scraped at all
     has_image = bool((row.get("image_url") or "").strip())
     has_date  = bool((row.get("date_listed") or "").strip())
-    return has_image or has_date
+    return has_image and has_date
 
 
 def _restore_from_row(listing: Listing, row: dict) -> None:
@@ -537,13 +537,21 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
 
     # --- Off-market detection ---
     # StreetEasy shows an "Unavailable" badge with "Delisted on MM/DD/YYYY" or
-    # "Rented on MM/DD/YYYY" on the detail page of units no longer available.
-    # Mark these now so the upsert step can persist the flag rather than
-    # treating a re-sighted URL as proof the listing is still active.
+    # "Rented on MM/DD/YYYY" on the detail page of units no longer available;
+    # the active badge reads "Available  Available now".
+    #
+    # We match the DATED badge form ("delisted on <date>" / "rented on <date>"),
+    # NOT the bare words — "Delisted"/"Rented" also appear in the price-history
+    # table of relisted units (e.g. "Delisted by ABODE NYC LLC" or a past
+    # "Rented" event).  The old bare-substring check false-flagged available
+    # listings as off-market and returned here early, which skipped date_listed
+    # and image_url extraction — leaving those rows with neither.  A positive
+    # "available now" badge always wins over stray history mentions.
     _body = full_text.lower()
-    _off_market_triggers = [p for p in ("unavailable", "delisted", "rented on") if p in _body]
-    if _off_market_triggers:
-        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: off-market triggers={_off_market_triggers}, body snippet={full_text[:200]!r}")
+    _is_available = "available now" in _body
+    _off_market = None if _is_available else re.search(r"(?:delisted|rented)\s+on\s+\d", _body)
+    if _off_market:
+        print(f"  [StreetEasy] {listing.url.split('/')[-1]}: off-market ({_off_market.group(0)!r})")
         listing.delisted = True
         return listing
 

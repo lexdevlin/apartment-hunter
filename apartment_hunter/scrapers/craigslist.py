@@ -129,23 +129,40 @@ def scrape(config: dict, existing_rows: dict | None = None) -> list[Listing]:
           f"(from {len(all_listings)} total)")
 
     # Enrich with detail pages using plain requests (server-side rendered).
-    # Skip listings already enriched in the CSV.
-    needs_enrich = [l for l in matched
-                    if not _is_enriched_cl(l.url, existing_rows)
-                    and (existing_rows.get(l.url) or {}).get("delisted", "").lower() != "true"]
-    cached       = len(matched) - len(needs_enrich)
+    # New listings are always enriched; previously-seen listings are re-enriched
+    # if they are missing image_url (heals listings added before photo extraction
+    # was implemented or where the prior detail fetch failed).
+    _MAX_REENRICH_STALE = 15
+
+    def _not_delisted_cl(url: str) -> bool:
+        return (existing_rows.get(url) or {}).get("delisted", "").lower() != "true"
+
+    new_listings  = [l for l in matched if l.url not in existing_rows]
+    stale_missing = [l for l in matched
+                     if l.url in existing_rows
+                     and not _is_enriched_cl(l.url, existing_rows)
+                     and _not_delisted_cl(l.url)]
+    needs_enrich  = {l.url for l in new_listings + stale_missing[:_MAX_REENRICH_STALE]}
+    cached        = len(matched) - len(needs_enrich)
+
+    _stale_msg = (f", {min(len(stale_missing), _MAX_REENRICH_STALE)}"
+                  + (f"/{len(stale_missing)}" if len(stale_missing) > _MAX_REENRICH_STALE else "")
+                  + " re-enriching stale") if stale_missing else ""
     print(f"  [Craigslist] enriching {len(needs_enrich)} listing(s) via detail pages"
-          + (f" ({cached} skipped — already in CSV)" if cached else "") + "...")
+          f" ({len(new_listings)} new{_stale_msg})"
+          + (f"  ({cached} cached)" if cached else "") + "...")
 
     detail_session = requests.Session(impersonate="chrome136")
     detail_session.headers.update(DETAIL_HEADERS)
     enriched = []
     for listing in matched:
-        if _is_enriched_cl(listing.url, existing_rows):
-            _restore_from_row_cl(listing, existing_rows[listing.url])
-        else:
+        if listing.url in needs_enrich:
+            if listing.url in existing_rows:
+                _restore_from_row_cl(listing, existing_rows[listing.url])
             listing = _enrich_listing(detail_session, listing)
             time.sleep(DETAIL_DELAY)
+        else:
+            _restore_from_row_cl(listing, existing_rows[listing.url])
         # Re-check after enrichment (title may have been updated from detail page)
         if _is_unwanted(listing.title):
             continue
@@ -327,13 +344,18 @@ def _dump_diagnostics(page, soup=None) -> None:
 # ---------------------------------------------------------------------------
 
 def _is_enriched_cl(url: str, existing_rows: dict) -> bool:
-    """True if the URL exists in the CSV and has already been through enrichment.
-    For CL, price is always set by the detail page — use it as the sentinel.
+    """True if the URL has been through enrichment and has all expected detail-page fields.
+    Requires both price and date_listed.  date_listed (not image_url) is the reliable
+    sentinel: every CL post is timestamped, whereas some posts genuinely have no photos
+    and would otherwise re-enrich forever.  Rows added before date extraction was
+    implemented are missing date_listed and so re-enrich exactly once to backfill it.
     """
     row = existing_rows.get(url)
     if not row:
         return False
-    return bool((row.get("price") or "").strip())
+    if not (row.get("price") or "").strip():
+        return False
+    return bool((row.get("date_listed") or "").strip())
 
 
 def _restore_from_row_cl(listing: Listing, row: dict) -> None:
@@ -349,10 +371,18 @@ def _restore_from_row_cl(listing: Listing, row: dict) -> None:
         try: return float(str(val).strip())
         except (ValueError, TypeError): return None
 
+    def _date(val):
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+            try: return datetime.strptime(str(val).strip(), fmt)
+            except (ValueError, TypeError): pass
+        return None
+
     if listing.price is None:
         raw = str(row.get("price") or "").replace("$", "").replace(",", "").strip()
         try: listing.price = int(raw)
         except (ValueError, TypeError): pass
+    if listing.date_listed is None:
+        listing.date_listed = _date(row.get("date_listed"))
     if listing.bedrooms is None:
         listing.bedrooms   = _int(row.get("bedrooms"))
     if listing.bathrooms is None:
@@ -436,6 +466,24 @@ def _enrich_listing(session: requests.Session, listing: Listing) -> Listing:
         clean = title_el.get_text(strip=True)
         if clean:
             listing.title = clean
+
+    # Date posted — CL detail pages embed a precise ISO timestamp in a
+    # <time class="date timeago" datetime="..."> under the "posted" label
+    # (a separate "updated" entry exists only if the post was later edited).
+    # This is far more reliable than the search card, which often omits it.
+    if listing.date_listed is None:
+        posted_dt = None
+        for p in soup.find_all("p", class_="postinginfo"):
+            if p.get_text(" ", strip=True).lower().startswith("posted"):
+                t = p.find("time")
+                if t and t.get("datetime"):
+                    posted_dt = t["datetime"]
+                    break
+        if posted_dt is None:
+            t = soup.find("time", class_="timeago")
+            posted_dt = t.get("datetime") if t and t.get("datetime") else None
+        if posted_dt:
+            listing.date_listed = _parse_iso_date(posted_dt)
 
     # Cross street — extract from body text if no numbered address was found
     if listing.address is None:
