@@ -23,7 +23,6 @@ import folium
 import streamlit.components.v1 as _components
 import pandas as pd
 import streamlit as st
-from streamlit_folium import st_folium
 from supabase import create_client, Client
 
 st.set_page_config(
@@ -234,6 +233,18 @@ def _listing_map(lat: float, lon: float) -> folium.Map:
                      padding=(20, 20))
 
     return m
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _listing_map_html(lat: float, lon: float) -> str:
+    """Render the listing map to a standalone HTML string, memoised per coordinate.
+
+    Served as a static iframe via st.components.v1.html instead of the bidirectional
+    st_folium component — so a rerun (skip / load-more) just re-injects pre-rendered
+    HTML rather than re-mounting a component and waiting on its round-trip handshake.
+    The map is still fully interactive client-side; we just don't read its state back.
+    """
+    return _listing_map(lat, lon).get_root().render()
 
 
 def _set_status(url: str, status: "str | None") -> None:
@@ -798,15 +809,11 @@ else:
             with top_right:
                 # Coordinates are geocoded by the scraper and stored on the listing
                 # (Supabase), so the map renders with no geocoding at render time.
+                # Static HTML (cached per coordinate) rather than st_folium — display
+                # only, no per-rerun component handshake.
                 _lat, _lon = listing.get("latitude"), listing.get("longitude")
                 if _lat is not None and _lon is not None:
-                    st_folium(
-                        _listing_map(float(_lat), float(_lon)),
-                        use_container_width=True,
-                        height=300,
-                        returned_objects=[],
-                        key=f"map_{listing.get('listing_id') or url[-12:]}",
-                    )
+                    _components.html(_listing_map_html(float(_lat), float(_lon)), height=300)
                 else:
                     st.caption("📍 No location available to map.")
 
