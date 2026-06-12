@@ -151,6 +151,66 @@ def _coerce(row: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Read side — Supabase is the scraper's source of truth for existing_rows
+# ---------------------------------------------------------------------------
+
+_PAGE_SIZE = 1000  # PostgREST default max rows per request
+
+
+def _iso_to_csv_datetime(v) -> str:
+    """Normalise a Supabase timestamptz ('2026-05-01T08:25:02+00:00') to the
+    CSV/merge format ('2026-05-01 08:25:02') the rest of the pipeline expects."""
+    s = str(v).replace("T", " ").strip()
+    s = re.sub(r"(?:\.\d+)?(?:[+-]\d{2}:?\d{2}|Z)?$", "", s).strip()
+    return s[:19]
+
+
+def _stringify_row(r: dict) -> dict:
+    """Coerce a typed Supabase row into the CSV-style string dict the merge and
+    gone-check expect: None/NaN → "", price → "$2,800", timestamps normalised,
+    everything else → str(v)."""
+    out: dict = {}
+    for k, v in r.items():
+        if v is None or (isinstance(v, float) and v != v):  # None or NaN
+            out[k] = ""
+        elif k in ("last_seen", "date_found"):
+            out[k] = _iso_to_csv_datetime(v)
+        elif k == "price":
+            try:
+                out[k] = f"${int(v):,}"
+            except (ValueError, TypeError):
+                out[k] = str(v)
+        else:
+            out[k] = str(v)
+    return out
+
+
+def fetch_existing_rows() -> dict:
+    """Load every listing from Supabase as CSV-style string rows keyed by url.
+
+    This is the scraper's source of truth for what existed before the current run
+    (existing_rows).  Pages through PostgREST's 1000-row cap.  user_status rides
+    along but is never written back (excluded from the upsert payload).
+    """
+    client = _get_client()
+    rows: dict = {}
+    start = 0
+    while True:
+        batch = (
+            client.table("listings").select("*")
+            .range(start, start + _PAGE_SIZE - 1).execute().data or []
+        )
+        for r in batch:
+            url = r.get("url")
+            if url:
+                rows[url] = _stringify_row(r)
+        if len(batch) < _PAGE_SIZE:
+            break
+        start += _PAGE_SIZE
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 

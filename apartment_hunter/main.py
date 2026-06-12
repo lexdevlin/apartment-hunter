@@ -475,7 +475,7 @@ def main():
                         help="Skip scraping; re-fetch StreetEasy detail pages to fill blank fields "
                              "and detect newly-delisted listings (writes results)")
     parser.add_argument("--sync-only", action="store_true",
-                        help="Skip scraping; download current OneDrive data and sync to Supabase")
+                        help="Skip scraping; export current Supabase data to the OneDrive CSV backup")
     args = parser.parse_args()
 
     if args.check_gone_only:
@@ -514,6 +514,8 @@ def main():
         return
 
     if args.sync_only:
+        # Export the current Supabase data (source of truth) to the OneDrive CSV
+        # backup.  This run-on-demand mirrors what the end of every scrape does.
         with open(CONFIG_PATH, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
@@ -521,24 +523,27 @@ def main():
         from apartment_hunter import onedrive as _onedrive, supabase_upsert
 
         print(f"\n{'='*50}")
-        print("OneDrive download")
+        print("Supabase download")
         print(f"{'='*50}")
-        df = _onedrive.download_listings(config)
-        if df.empty:
-            print("No listings found on OneDrive.")
+        if not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY")):
+            print("  SUPABASE_URL / SUPABASE_KEY not set — nothing to export.")
             return
-        print(f"  {len(df)} row(s) loaded")
+        rows = supabase_upsert.fetch_existing_rows()
+        if not rows:
+            print("No listings found in Supabase.")
+            return
+        print(f"  {len(rows)} row(s) loaded")
 
         print(f"\n{'='*50}")
-        print("Supabase sync")
+        print("OneDrive upload")
         print(f"{'='*50}")
-        if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
-            t_sb = time.perf_counter()
-            rows = df.to_dict("records")
-            n_synced = supabase_upsert.upsert_listings(rows)
-            print(f"  {n_synced} row(s) synced  [{_elapsed(t_sb)}]")
+        if os.environ.get("APARTMENT_ONEDRIVE_REFRESH_TOKEN"):
+            t_od = time.perf_counter()
+            df = pd.DataFrame(list(rows.values()), columns=EXCEL_COLUMNS)
+            _onedrive.upload_listings(config, df)
+            print(f"  uploaded {len(df)} row(s)  [{_elapsed(t_od)}]")
         else:
-            print("  SUPABASE_URL / SUPABASE_KEY not set — skipping.")
+            print("  APARTMENT_ONEDRIVE_REFRESH_TOKEN not set — skipping.")
         return
 
     if args.rent_stabilized_only:
@@ -645,15 +650,14 @@ def main():
             return
 
         print(f"\n{'='*50}")
-        print("OneDrive download")
+        print("Supabase download")
         print(f"{'='*50}")
-        df = _onedrive.download_listings(config)
-        if df.empty:
-            print("No listings found on OneDrive.")
+        from apartment_hunter import supabase_upsert
+        rows = supabase_upsert.fetch_existing_rows()
+        if not rows:
+            print("No listings found in Supabase.")
             return
-
-        rows = {r["url"]: r for r in df.to_dict("records") if r.get("url")}
-        print(f"Loaded {len(rows)} row(s) from OneDrive")
+        print(f"Loaded {len(rows)} row(s) from Supabase")
 
         n_delisted_total = 0
         n_updated_total  = 0
@@ -745,18 +749,12 @@ def main():
             n_updated_total  += n_updated
             n_checked_total  += len(to_enrich)
 
-        print(f"\n{'='*50}")
-        print("OneDrive upload")
-        print(f"{'='*50}")
-        updated_df = pd.DataFrame(list(rows.values()), columns=EXCEL_COLUMNS)
-        _onedrive.upload_listings(config, updated_df)
-
+        # Supabase first (source of truth), then OneDrive (downstream backup).
         print(f"\n{'='*50}")
         print("Supabase sync")
         print(f"{'='*50}")
         if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
             try:
-                from apartment_hunter import supabase_upsert
                 t_sb = time.perf_counter()
                 n_synced = supabase_upsert.upsert_listings(list(rows.values()))
                 print(f"  {n_synced} row(s) synced  [{_elapsed(t_sb)}]")
@@ -764,6 +762,15 @@ def main():
                 print(f"  [Supabase] sync failed: {e}")
         else:
             print("  SUPABASE_URL / SUPABASE_KEY not set — skipping.")
+
+        print(f"\n{'='*50}")
+        print("OneDrive upload")
+        print(f"{'='*50}")
+        if os.environ.get("APARTMENT_ONEDRIVE_REFRESH_TOKEN"):
+            updated_df = pd.DataFrame(list(rows.values()), columns=EXCEL_COLUMNS)
+            _onedrive.upload_listings(config, updated_df)
+        else:
+            print("  APARTMENT_ONEDRIVE_REFRESH_TOKEN not set — skipping.")
 
         print(f"\nTotal: {n_delisted_total} newly delisted, {n_updated_total} field(s) updated  "
               f"({n_checked_total} listing(s) checked across {len(sources_to_run)} source(s))")
@@ -774,32 +781,25 @@ def main():
     with open(CONFIG_PATH, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # Load existing rows — OneDrive is the source of truth; local CSV is fallback
-    # for when OneDrive credentials aren't available (e.g. offline testing).
+    # Load existing rows — Supabase is the source of truth; local CSV is the
+    # fallback for offline / no-credential dev.  (OneDrive is now a downstream
+    # backup only — it is written after Supabase, never read as input.)
     existing_rows = {}
-    _od_token = os.environ.get("APARTMENT_ONEDRIVE_REFRESH_TOKEN")
-    if _od_token:
-        print("\nLoading existing listings from OneDrive...")
+    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"):
+        print("\nLoading existing listings from Supabase...")
         try:
-            import pandas as pd
-            from apartment_hunter import onedrive as _onedrive
-            _df = _onedrive.download_listings(config)
-            if not _df.empty:
-                existing_rows = {
-                    row["url"]: {k: ("" if (v is None or (isinstance(v, float) and v != v)) else str(v)) for k, v in row.items()}
-                    for _, row in _df.iterrows()
-                    if row.get("url")
-                }
-                print(f"  {len(existing_rows)} existing listing(s) loaded from OneDrive")
+            from apartment_hunter import supabase_upsert
+            existing_rows = supabase_upsert.fetch_existing_rows()
+            print(f"  {len(existing_rows)} existing listing(s) loaded from Supabase")
         except Exception as e:
-            print(f"  [OneDrive] could not load: {e} — falling back to local CSV")
+            print(f"  [Supabase] could not load: {e} — falling back to local CSV")
             existing_rows = _load_csv_rows()
             if existing_rows:
                 print(f"  {len(existing_rows)} existing listing(s) loaded from {OUTPUT_PATH}")
     else:
         existing_rows = _load_csv_rows()
         if existing_rows:
-            print(f"\n{len(existing_rows)} existing listing(s) loaded from {OUTPUT_PATH} (no OneDrive token)")
+            print(f"\n{len(existing_rows)} existing listing(s) loaded from {OUTPUT_PATH} (no Supabase creds)")
 
     sources_cfg = config.get("sources", {})
     all_listings = []
