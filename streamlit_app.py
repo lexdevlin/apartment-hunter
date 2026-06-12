@@ -780,7 +780,11 @@ else:
         wd         = listing.get("washer_dryer")
         user_status = listing.get("user_status")
         date_listed = (listing.get("date_listed") or "")[:10]
-        status_fmt  = _fmt_listing_status(listing.get("listing_status"))
+        # Default to "Available": the app only renders active (non-delisted)
+        # listings, so one with no known badge is available by definition.
+        # Real statuses (e.g. "Temporarily off market") override the default as
+        # the scraper backfills them. (Craigslist has no badge → always Available.)
+        status_fmt  = _fmt_listing_status(listing.get("listing_status")) or "Available"
 
         with st.container(border=True):
             # ── Top row: details (left) + map (right) ───────────────────────

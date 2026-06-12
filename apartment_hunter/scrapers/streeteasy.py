@@ -453,19 +453,21 @@ def _is_enriched(url: str, existing_rows: dict) -> bool:
 
     bedrooms is NOT a reliable sentinel — it is also extracted from the search
     card, so a listing can have bedrooms set without the detail page ever having
-    been fetched.  We require BOTH fields that come exclusively from the detail
-    page (image_url AND date_listed) to confirm a successful fetch.  Listings
-    missing either will be re-enriched, self-healing prior failures (403, timeout,
-    regex miss, or listings added before photo/date extraction was implemented).
+    been fetched.  We require all three fields that come exclusively from the
+    detail page (image_url AND date_listed AND listing_status) to confirm a
+    successful, current fetch.  Listings missing any of them will be re-enriched
+    (capped per run), self-healing prior failures and gradually backfilling
+    listing_status onto rows added before that field existed.
     """
     row = existing_rows.get(url)
     if not row:
         return False
     if not (row.get("bedrooms") or "").strip():
         return False  # never been scraped at all
-    has_image = bool((row.get("image_url") or "").strip())
-    has_date  = bool((row.get("date_listed") or "").strip())
-    return has_image and has_date
+    has_image  = bool((row.get("image_url") or "").strip())
+    has_date   = bool((row.get("date_listed") or "").strip())
+    has_status = bool((row.get("listing_status") or "").strip())
+    return has_image and has_date and has_status
 
 
 def _restore_from_row(listing: Listing, row: dict) -> None:
