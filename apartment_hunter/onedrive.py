@@ -25,7 +25,9 @@ Environment variables required:
 
 import io
 import os
+import re
 import tempfile
+from datetime import datetime
 from typing import Optional
 
 import msal
@@ -115,6 +117,95 @@ def upload_listings(config: dict, df: pd.DataFrame) -> None:
     resp = requests.put(url, headers=headers, data=excel_bytes, timeout=60)
     resp.raise_for_status()
     print(f"  [OneDrive] uploaded {len(df)} listings to '{file_path}'")
+
+
+def upload_backup(config: dict, df: pd.DataFrame, keep: int = 20) -> None:
+    """
+    Write a timestamped backup copy of the listings workbook into the same
+    OneDrive folder as the main file (e.g. ".../Apartment Hunter/"), then prune
+    to the newest `keep` backups.
+
+    Backup filename: "<main stem> <YYYY-MM-DD HH-MM-SS>.xlsx" (UTC), e.g.
+    "Apartment Listings 2026-06-11 14-30-05.xlsx".  The timestamp is colon-free
+    so it is a valid OneDrive/Windows filename and sorts chronologically.
+
+    The main file (no timestamp in its name) never matches the backup pattern,
+    so it is never pruned even though it lives in the same folder.
+    """
+    token = _get_token()
+    file_path = _resolve_file_path(config)
+    sheet = config.get("onedrive", {}).get("sheet_name", "Listings")
+
+    folder, main_name = _split_path(file_path)
+    stem = main_name[:-5] if main_name.lower().endswith(".xlsx") else main_name
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H-%M-%S")
+    backup_name = f"{stem} {ts}.xlsx"
+    backup_path = f"{folder}/{backup_name}" if folder else backup_name
+
+    excel_bytes = _df_to_excel_bytes(df, sheet)
+    url = GRAPH_BASE.format(path=backup_path, action="/content")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
+    resp = requests.put(url, headers=headers, data=excel_bytes, timeout=60)
+    resp.raise_for_status()
+    print(f"  [OneDrive] backup written: '{backup_name}'")
+
+    _prune_backups(token, folder, stem, keep)
+
+
+def _prune_backups(token: str, folder: str, stem: str, keep: int) -> None:
+    """Delete the oldest timestamped backups beyond the newest `keep`."""
+    pattern = re.compile(
+        r"^" + re.escape(stem) + r" (\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})\.xlsx$"
+    )
+    backups = []
+    for item in _list_children(token, folder):
+        m = pattern.match(item.get("name", ""))
+        if m and "file" in item:          # files only, never folders
+            backups.append((m.group(1), item))      # (timestamp, item)
+
+    backups.sort(key=lambda x: x[0])                 # oldest first (lexical = chrono)
+    n_delete = max(0, len(backups) - keep)
+    for _ts, item in backups[:n_delete]:
+        _delete_item(token, item["id"])
+        print(f"  [OneDrive] pruned old backup: '{item.get('name')}'")
+    print(f"  [OneDrive] {min(len(backups), keep)} backup(s) retained"
+          + (f", {n_delete} pruned" if n_delete else "") + f" (keep={keep})")
+
+
+def _list_children(token: str, folder: str) -> list[dict]:
+    """List items in a OneDrive folder (paginated).  Empty list if missing."""
+    if folder:
+        url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{folder}:/children"
+    else:
+        url = "https://graph.microsoft.com/v1.0/me/drive/root/children"
+    items: list[dict] = []
+    while url:
+        resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        data = resp.json()
+        items.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
+    return items
+
+
+def _delete_item(token: str, item_id: str) -> None:
+    url = f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}"
+    resp = requests.delete(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    if resp.status_code not in (204, 404):
+        resp.raise_for_status()
+
+
+def _split_path(file_path: str) -> tuple[str, str]:
+    """Split 'a/b/c.xlsx' into ('a/b', 'c.xlsx'); ('', 'c.xlsx') if at root."""
+    if "/" in file_path:
+        folder, name = file_path.rsplit("/", 1)
+        return folder, name
+    return "", file_path
 
 
 # ---------------------------------------------------------------------------

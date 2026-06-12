@@ -120,6 +120,8 @@ sources:
 onedrive:
   file_path: "Data Analytics/Apartment Hunter/Apartment Listings.xlsx"
   sheet_name: "Listings"
+  backups: true        # write a timestamped backup copy into the same folder each run
+  backup_keep: 20      # retain this many newest backups; older ones are pruned
 
 # ============================================================
 # Azure Blob — Dashboard hosting

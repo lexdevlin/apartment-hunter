@@ -945,6 +945,9 @@ def main():
             t_od = time.perf_counter()
             df = pd.DataFrame(merged_rows, columns=csv_columns)
             onedrive.upload_listings(config, df)
+            _od_cfg = config.get("onedrive", {})
+            if _od_cfg.get("backups", True):
+                onedrive.upload_backup(config, df, keep=_od_cfg.get("backup_keep", 20))
             print(f"  [{_elapsed(t_od)}]")
         except Exception as e:
             print(f"  [OneDrive] upload failed: {e}")
