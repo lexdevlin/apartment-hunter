@@ -170,14 +170,34 @@ def _warmed_streeteasy_session():
     return sess
 
 
-def _is_gone(url: str, source: str, verbose: bool = False, session=None) -> bool:
-    """
-    Return True only when we have a definitive signal that the listing is gone.
-    Return False on any ambiguous result (403, timeout, network error).
+# Three-state verdicts returned by _is_gone.
+GONE      = "gone"        # definitive: 404/410, or a 200 page that says off-market
+LIVE      = "live"        # definitive: a 200 page that says the listing is active
+AMBIGUOUS = "ambiguous"   # inconclusive: 403, soft-block, timeout, network error
 
-    Status codes treated as definitive:
-      404 — standard "not found"
-      410 — "Gone" (used by Craigslist for deleted posts)
+# A listing unseen in search results for this many days that we *also* cannot
+# confirm live (persistent AMBIGUOUS) is presumed gone — a backstop so a permalink
+# that perpetually 403s or whose badge stops matching can't stay visible forever.
+_PRESUME_GONE_DAYS = 60
+
+# Re-warm the StreetEasy gone-check session after this many checks to avoid the
+# per-session throttling its bot scorer applies to high-volume sessions.
+_SE_ROTATE_EVERY = 12
+
+
+def _is_gone(url: str, source: str, verbose: bool = False, session=None) -> str:
+    """
+    Classify a listing's current availability by fetching its URL directly.
+
+    Returns one of: GONE / LIVE / AMBIGUOUS.
+      GONE       — 404/410, or a 200 page whose content says it's off-market
+      LIVE       — a 200 page whose content confirms it's still active
+      AMBIGUOUS  — 403, soft-block (200 with no recognisable status), timeout,
+                   network error, or any other inconclusive result
+
+    The caller decides what to do with AMBIGUOUS (retry next run, or — for very
+    stale listings — presume gone).  This used to return a bare bool, collapsing
+    LIVE and AMBIGUOUS together, which hid the distinction the backstop needs.
 
     `session`: an optional pre-warmed StreetEasy session to reuse across a batch
     (see _check_gone_listings).  One is created and warmed on demand otherwise.
@@ -187,11 +207,11 @@ def _is_gone(url: str, source: str, verbose: bool = False, session=None) -> bool
     if source == "craigslist" and "?ll=" in url:
         if verbose:
             print("      → skipped (Craigslist pseudo-URL, not a real post permalink)")
-        return False
+        return AMBIGUOUS
 
     # StreetEasy 403s minimal/non-session requests and only serves the page to a
     # warmed browser-like session — without this the gone-check could never
-    # confirm a StreetEasy listing as off-market (it read every 403 as "ambiguous").
+    # confirm a StreetEasy listing as off-market (it read every 403 as ambiguous).
     try:
         if source == "streeteasy":
             sess = session if session is not None else _warmed_streeteasy_session()
@@ -202,7 +222,7 @@ def _is_gone(url: str, source: str, verbose: bool = False, session=None) -> bool
     except requests.RequestsError as e:
         if verbose:
             print(f"      network error: {e}")
-        return False
+        return AMBIGUOUS
 
     if verbose:
         redirected = resp.url != url
@@ -212,12 +232,12 @@ def _is_gone(url: str, source: str, verbose: bool = False, session=None) -> bool
     if resp.status_code in (404, 410):
         if verbose:
             print(f"      → GONE ({resp.status_code})")
-        return True
+        return GONE
 
     if resp.status_code != 200:
         if verbose:
             print(f"      → ambiguous ({resp.status_code}) — not flagging")
-        return False
+        return AMBIGUOUS
 
     # StreetEasy: classify via the status badge (same logic as enrichment) rather
     # than bare substrings — "delisted"/"rented" also appear in the price-history
@@ -228,21 +248,35 @@ def _is_gone(url: str, source: str, verbose: bool = False, session=None) -> bool
         from bs4 import BeautifulSoup
         text = BeautifulSoup(resp.text, "lxml").get_text(" ", strip=True).lower()
         status = streeteasy.classify_status(text)
-        gone = status in ("delisted", "rented", "unavailable")
+        if status in ("delisted", "rented", "unavailable"):
+            verdict = GONE
+        elif status in ("available", "temporarily_off_market"):
+            verdict = LIVE
+        else:
+            verdict = AMBIGUOUS   # badge not found — likely a soft-block, retry later
         if verbose:
-            print(f"      → status badge: {status or 'unknown'} "
-                  f"({'GONE' if gone else 'still live'})")
-        return gone
+            print(f"      → status badge: {status or 'unknown'} ({verdict})")
+        return verdict
 
     body = resp.text.lower()
     patterns = _GONE_PATTERNS.get(source, [])
     matched = [p for p in patterns if p in body]
     if verbose:
-        if matched:
-            print(f"      → GONE (matched: {matched})")
-        else:
-            print("      → still live (no gone patterns matched)")
-    return bool(matched)
+        print(f"      → GONE (matched: {matched})" if matched else "      → still live")
+    return GONE if matched else LIVE
+
+
+def _days_since(date_str: str) -> "float | None":
+    """Days between now (UTC) and a stored date string, or None if unparseable."""
+    if not date_str:
+        return None
+    raw = str(date_str).strip()
+    for fmt, n in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d", 10), ("%m/%d/%Y", 10)):
+        try:
+            return (datetime.utcnow() - datetime.strptime(raw[:n], fmt)).days
+        except ValueError:
+            continue
+    return None
 
 
 def _check_gone_listings(unseen_rows: list[dict], verbose: bool = False) -> int:
@@ -250,6 +284,13 @@ def _check_gone_listings(unseen_rows: list[dict], verbose: bool = False) -> int:
     For rows not seen in the current scrape, check each URL directly.
     Mutates rows in-place: sets delisted='True' on confirmed-gone listings.
     Returns count of newly confirmed-gone listings.
+
+    Two ways a listing is flagged:
+      1. The direct fetch confirms it's gone (GONE verdict).
+      2. The fetch is inconclusive (AMBIGUOUS) AND the listing hasn't been seen in
+         search for >= _PRESUME_GONE_DAYS — a backstop so a permalink that keeps
+         403'ing (or whose badge stops matching) can't stay visible indefinitely.
+    A listing the fetch confirms LIVE is always kept, regardless of age.
     """
     if not unseen_rows:
         return 0
@@ -265,9 +306,13 @@ def _check_gone_listings(unseen_rows: list[dict], verbose: bool = False) -> int:
               + (f"({already} already delisted, " if already else "(")
               + f"{checkable} to check)")
 
-    # One warmed StreetEasy session reused across the batch (warms up only if
-    # there is at least one StreetEasy listing to check).
+    # A warmed StreetEasy session, rotated every _SE_ROTATE_EVERY checks.  StreetEasy's
+    # bot scorer accrues a per-session score from request volume and eventually
+    # 403s a long-lived session; a fresh warmed session resets it.  Without this a
+    # large backlog (no per-run cap exists) would get throttled mid-batch and the
+    # remainder silently read as AMBIGUOUS.  Matches the scrapers' rotate-every-10.
     se_session = None
+    se_checks  = 0
     if any(r.get("source") == "streeteasy" and r.get("delisted", "").lower() != "true"
            for r in unseen_rows):
         se_session = _warmed_streeteasy_session()
@@ -279,15 +324,27 @@ def _check_gone_listings(unseen_rows: list[dict], verbose: bool = False) -> int:
         if not url or row.get("delisted", "").lower() == "true":
             continue
 
+        if source == "streeteasy":
+            if se_checks and se_checks % _SE_ROTATE_EVERY == 0:
+                se_session = _warmed_streeteasy_session()
+            se_checks += 1
+
         if verbose:
             print(f"  [{source}] last_seen={row.get('last_seen', '?')}  {url[:80]}")
-        gone = _is_gone(url, source, verbose=verbose,
-                        session=se_session if source == "streeteasy" else None)
-        if gone:
+        verdict = _is_gone(url, source, verbose=verbose,
+                           session=se_session if source == "streeteasy" else None)
+        if verdict == GONE:
             row["delisted"] = "True"
             newly_gone += 1
             if not verbose:
                 print(f"    [delisted] {url[:80]}")
+        elif verdict == AMBIGUOUS:
+            # Backstop: can't confirm, but unseen so long it's almost certainly gone.
+            age = _days_since(row.get("last_seen", ""))
+            if age is not None and age >= _PRESUME_GONE_DAYS:
+                row["delisted"] = "True"
+                newly_gone += 1
+                print(f"    [presumed gone] unseen {age}d, unconfirmable  {url[:80]}")
         time.sleep(random.uniform(1.0, 2.5))
 
     return newly_gone
@@ -433,17 +490,27 @@ def main():
         print(f"Checking {len(to_check)} row(s) (skipping already delisted)"
               + (f"  [limit={limit}]" if args.limit else ""))
         print("No changes will be written.\n")
+        se_session = _warmed_streeteasy_session() if any(
+            r.get("source") == "streeteasy" for r in to_check) else None
         gone_count = 0
+        presumed_count = 0
         for row in to_check:
             url    = row.get("url", "")
             source = row.get("source", "")
             print(f"[{source}] {url[:90]}")
-            gone = _is_gone(url, source, verbose=True)
-            if gone:
+            verdict = _is_gone(url, source, verbose=True,
+                               session=se_session if source == "streeteasy" else None)
+            if verdict == GONE:
                 gone_count += 1
+            elif verdict == AMBIGUOUS:
+                age = _days_since(row.get("last_seen", ""))
+                if age is not None and age >= _PRESUME_GONE_DAYS:
+                    presumed_count += 1
+                    print(f"      → would presume gone (unseen {age}d, unconfirmable)")
             time.sleep(random.uniform(1.0, 2.5))
         print(f"\n{'='*50}")
-        print(f"Would flag {gone_count} of {len(to_check)} checked listing(s) as delisted.")
+        print(f"Would flag {gone_count} confirmed + {presumed_count} presumed-gone "
+              f"of {len(to_check)} checked listing(s) as delisted.")
         return
 
     if args.sync_only:
