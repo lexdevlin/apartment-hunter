@@ -14,7 +14,6 @@ Keys required:
 """
 
 import csv
-import json
 import os
 import re
 from datetime import datetime
@@ -23,7 +22,6 @@ from pathlib import Path
 import folium
 import streamlit.components.v1 as _components
 import pandas as pd
-import requests as _requests
 import streamlit as st
 from streamlit_folium import st_folium
 from supabase import create_client, Client
@@ -79,19 +77,6 @@ def load_listings() -> list[dict]:
     return data
 
 
-@st.cache_resource
-def _load_geocode_cache() -> dict:
-    """Load the scraper's geocode_cache.json (keyed 'address|neighborhood')."""
-    p = Path(__file__).parent / "apartment_hunter" / "data" / "geocode_cache.json"
-    if not p.exists():
-        return {}
-    try:
-        with open(p, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
 @st.cache_data(ttl=86400)
 def _load_stations() -> list[dict]:
     """Load subway_stations.csv → list of {name, routes, lat, lon}."""
@@ -114,36 +99,6 @@ def _load_stations() -> list[dict]:
     except Exception:
         return []
     return stations
-
-
-def _resolve_coords(address: str, neighborhood: str) -> "tuple[float, float] | None":
-    """
-    Look up (lat, lon) for a listing:
-      1. Geocode cache — exact 'address|neighborhood' key, then any key with the
-         same address (the stored neighborhood may differ from the display-
-         normalized one, e.g. "PLG: ..." vs "Prospect Lefferts Gardens").
-      2. Live geocode via subway._geocode — shares the scraper's logic, including
-         the Overpass intersection fallback for cross-street addresses that
-         Nominatim can't place ("Midwood St near Kingston Ave").
-    """
-    addr = (address or "").strip()
-    if not addr:
-        return None
-
-    cache = _load_geocode_cache()
-    key = f"{addr}|{neighborhood}" if neighborhood else addr
-    if cache.get(key):
-        return tuple(cache[key])
-    prefix = f"{addr}|"
-    for k, v in cache.items():
-        if v and k.startswith(prefix):
-            return tuple(v)
-
-    try:
-        from apartment_hunter import subway
-        return subway._geocode(addr, neighborhood)
-    except Exception:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +238,10 @@ def _listing_map(lat: float, lon: float) -> folium.Map:
 
 def _set_status(url: str, status: "str | None") -> None:
     _get_client().table("listings").update({"user_status": status}).eq("url", url).execute()
-    load_listings.clear()
+    # Reflect the change immediately via a session overlay instead of clearing the
+    # whole listings cache — clearing forced a full ~1.7s Supabase refetch on every
+    # Save/Skip.  The overlay is applied to the cached data right after it loads.
+    st.session_state.setdefault("_status_overrides", {})[url] = status
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +339,15 @@ st.sidebar.markdown("---")
 # Load data (needed to populate filter options)
 all_listings = load_listings()
 
+# Apply this session's pending Save/Skip changes without a Supabase refetch.
+# (Supabase was already updated in _set_status; this just keeps the cached view
+# in sync until the cache naturally refreshes.)
+_overrides = st.session_state.get("_status_overrides")
+if _overrides:
+    for _l in all_listings:
+        if _l.get("url") in _overrides:
+            _l["user_status"] = _overrides[_l["url"]]
+
 sources       = sorted({l["source"] for l in all_listings if l.get("source")})
 neighborhoods = sorted({l["neighborhood"] for l in all_listings if l.get("neighborhood")})
 
@@ -394,6 +361,7 @@ st.sidebar.markdown("---")
 
 if st.sidebar.button("↺ Refresh data"):
     load_listings.clear()
+    st.session_state.pop("_status_overrides", None)  # reset overlay to Supabase truth
     st.rerun()
 
 st.sidebar.caption(
@@ -452,31 +420,6 @@ elif sort_by == "Score + Date listed":
         -_date_ts(l.get("date_listed")),
     ))
 # "Score" → keep the priority/score/date_found order from load_listings()
-
-# ---------------------------------------------------------------------------
-# DEBUG (temporary) — remove once map is confirmed working
-# ---------------------------------------------------------------------------
-with st.expander("🔧 Map debug info", expanded=False):
-    _stations_path = Path(__file__).parent / "apartment_hunter" / "data" / "subway_stations.csv"
-    st.write(f"**CSV path:** `{_stations_path}`")
-    st.write(f"**CSV exists:** {_stations_path.exists()}")
-    if st.button("Clear station cache"):
-        _load_stations.clear()
-        st.rerun()
-    stations = _load_stations()
-    st.write(f"**Stations loaded:** {len(stations)}")
-    if all_listings:
-        first = all_listings[0]
-        addr = first.get("address") or ""
-        hood = first.get("neighborhood") or ""
-        coords = _resolve_coords(addr, hood)
-        st.write(f"**First listing:** `{addr}` / `{hood}`")
-        st.write(f"**Resolved coords:** {coords}")
-        if coords:
-            nearest = _nearest_stations(coords[0], coords[1], n=5)
-            st.write(f"**Nearest stations ({len(nearest)}):**")
-            for s in nearest:
-                st.write(f"  - {s['name']} ({s['routes']}) @ {s['lat']:.5f}, {s['lon']:.5f}")
 
 # ---------------------------------------------------------------------------
 # Summary metrics
@@ -853,18 +796,19 @@ else:
                     st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
 
             with top_right:
-                _coords = _resolve_coords(listing.get("address") or "", hood or "")
-                if _coords:
-                    _lat, _lon = _coords
+                # Coordinates are geocoded by the scraper and stored on the listing
+                # (Supabase), so the map renders with no geocoding at render time.
+                _lat, _lon = listing.get("latitude"), listing.get("longitude")
+                if _lat is not None and _lon is not None:
                     st_folium(
-                        _listing_map(_lat, _lon),
+                        _listing_map(float(_lat), float(_lon)),
                         use_container_width=True,
                         height=300,
                         returned_objects=[],
                         key=f"map_{listing.get('listing_id') or url[-12:]}",
                     )
                 else:
-                    st.caption("📍 No address available to map.")
+                    st.caption("📍 No location available to map.")
 
             # ── Bottom row: image carousel (full width) ──────────────────────
             images = [u.strip() for u in (image_url or "").split(",") if u.strip()]

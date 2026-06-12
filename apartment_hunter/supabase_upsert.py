@@ -141,6 +141,8 @@ def _coerce(row: dict) -> dict:
         "washer_dryer":    _bool(row.get("washer_dryer")),
         "subway_lines":    _str(row.get("subway_lines")),
         "nearest_subway":  _str(row.get("nearest_subway")),
+        "latitude":        _float(row.get("latitude")),
+        "longitude":       _float(row.get("longitude")),
         "title":           _str(row.get("title")),
         "listing_id":      _str(row.get("listing_id")),
         "image_url":       _str(row.get("image_url")),

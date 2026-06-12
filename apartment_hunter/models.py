@@ -25,6 +25,8 @@ class Listing:
     washer_dryer: Optional[bool] = None     # None = unknown; True = confirmed in-unit W/D
     date_listed: Optional[datetime] = None  # when the listing was created on the source site
     nearest_subway: Optional[str] = None    # e.g. "DeKalb Av (L) ~4 min; Myrtle-Wyckoff Avs (L/M) ~9 min"
+    latitude: Optional[float] = None        # geocoded during subway enrichment; used by the app's map
+    longitude: Optional[float] = None
     date_found: datetime = field(default_factory=datetime.utcnow)
     last_seen: Optional[str] = None   # "YYYY-MM-DD" of most recent scrape where listing appeared
     delisted: bool = False            # True only when URL returned a definitive "not available" signal
@@ -79,6 +81,8 @@ class Listing:
             "date_listed": _fmt_date(self.date_listed),
             "subway_lines": self.subway_lines,
             "nearest_subway": self.nearest_subway,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
             "date_found": _fmt_datetime(self.date_found),
             "last_seen": self.last_seen,
             "delisted": self.delisted or None,
@@ -114,6 +118,8 @@ EXCEL_COLUMNS = [
     "washer_dryer",
     "subway_lines",
     "nearest_subway",
+    "latitude",
+    "longitude",
     "title",
     "listing_id",
     "image_url",

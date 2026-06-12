@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS listings (
     date_listed        DATE,                           -- when listing was posted on the source site
     nearest_subway     TEXT,                           -- full proximity string, e.g. "DeKalb Av (L) ~4 min"
     subway_lines       TEXT,                           -- compact version, e.g. "(L) ~4 min | (M) ~9 min"
+    latitude           REAL,                           -- geocoded point (subway enrichment); read by the app's map
+    longitude          REAL,
     date_found         TIMESTAMPTZ,                    -- when our scraper first saw this listing
     last_seen          TIMESTAMPTZ,                    -- most recent scrape run that found this listing
     delisted           BOOLEAN     DEFAULT FALSE,      -- TRUE = confirmed gone (404/410 or gone-pattern match)
@@ -47,6 +49,8 @@ CREATE TABLE IF NOT EXISTS listings (
 -- If you already ran the schema before these columns existed, add them:
 --   ALTER TABLE listings ADD COLUMN IF NOT EXISTS image_url TEXT;
 --   ALTER TABLE listings ADD COLUMN IF NOT EXISTS listing_status TEXT;
+--   ALTER TABLE listings ADD COLUMN IF NOT EXISTS latitude REAL;
+--   ALTER TABLE listings ADD COLUMN IF NOT EXISTS longitude REAL;
 -- ============================================================
 
 -- ============================================================

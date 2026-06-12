@@ -543,6 +543,9 @@ def enrich(listings: list[Listing], verbose: bool = False) -> int:
         if coords is None:
             continue
         lat, lon = coords
+        # Persist the geocoded point on the listing so it reaches Supabase — the
+        # app reads these for its map instead of geocoding at render time.
+        listing.latitude, listing.longitude = lat, lon
         nearest = _nearest(lat, lon, stations)
         if nearest:
             listing.nearest_subway = _format(nearest)
