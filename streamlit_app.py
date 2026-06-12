@@ -53,17 +53,20 @@ def _get_client() -> Client:
     return create_client(url, key)
 
 
+def _date_ts(d) -> float:
+    """Timestamp for a date/datetime string ('YYYY-MM-DD' or full ISO);
+    0.0 when missing or unparseable, so undated rows sort last under desc order."""
+    try:
+        return datetime.fromisoformat(str(d)[:19]).timestamp() if d else 0.0
+    except ValueError:
+        return 0.0
+
+
 @st.cache_data(ttl=300)
 def load_listings() -> list[dict]:
     result = _get_client().table("listings").select("*").or_("delisted.is.null,delisted.is.false").execute()
     data = result.data or []
     # Sort: priority first, then by score descending, then by date_found descending
-    def _date_ts(d) -> float:
-        try:
-            return datetime.fromisoformat(str(d)[:19]).timestamp() if d else 0.0
-        except ValueError:
-            return 0.0
-
     data.sort(key=lambda l: (
         not l.get("is_priority", False),
         -(l.get("priority_score") or 0),
@@ -356,13 +359,17 @@ st.sidebar.title("🏠 Apartment Hunter")
 
 status_view = st.sidebar.radio(
     "Show listings",
-    ["Unreviewed", "Saved", "Skipped", "All active"],
+    ["Unreviewed", "Saved", "Saved & Unreviewed", "Skipped", "All active"],
     index=0,
 )
 
 priority_only = st.sidebar.checkbox("Priority only", value=False)
 
-sort_by = st.sidebar.selectbox("Sort by", ["Score", "Price ↑", "Price ↓"], index=0)
+sort_by = st.sidebar.selectbox(
+    "Sort by",
+    ["Score", "Score + Date listed", "Date listed", "Price ↑", "Price ↓"],
+    index=0,
+)
 
 st.sidebar.markdown("**Amenities**")
 filter_rent_stab  = st.sidebar.checkbox("Rent stabilized", value=False, key="f_rs")
@@ -408,6 +415,8 @@ def _apply_filters(listings: list[dict]) -> list[dict]:
             continue
         if status_view == "Saved" and status != "saved":
             continue
+        if status_view == "Saved & Unreviewed" and status == "skipped":
+            continue  # keep unreviewed (None) + saved; exclude only skipped
         if status_view == "Skipped" and status != "skipped":
             continue
         if priority_only and not l.get("is_priority"):
@@ -432,6 +441,17 @@ if sort_by == "Price ↑":
     filtered.sort(key=lambda l: l.get("price") or 999_999)
 elif sort_by == "Price ↓":
     filtered.sort(key=lambda l: -(l.get("price") or 0))
+elif sort_by == "Date listed":
+    # Newest listings first; undated rows fall to the bottom.
+    filtered.sort(key=lambda l: -_date_ts(l.get("date_listed")))
+elif sort_by == "Score + Date listed":
+    # Nested: priority first, then score desc, then most-recently-listed first.
+    filtered.sort(key=lambda l: (
+        not l.get("is_priority", False),
+        -(l.get("priority_score") or 0),
+        -_date_ts(l.get("date_listed")),
+    ))
+# "Score" → keep the priority/score/date_found order from load_listings()
 
 # ---------------------------------------------------------------------------
 # DEBUG (temporary) — remove once map is confirmed working
