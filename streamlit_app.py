@@ -495,8 +495,11 @@ _components.html("""
       'background:rgba(0,0,0,0.93);align-items:center;justify-content:center;';
     lb.innerHTML =
       '<button id="apt-lb-x" title="Close (Esc)" style="' +
-        'position:absolute;top:16px;right:20px;background:none;border:none;' +
-        'color:#fff;font-size:32px;cursor:pointer;line-height:1;opacity:0.8;padding:4px 10px;">✕</button>' +
+        'position:absolute;top:16px;right:20px;z-index:100001;' +
+        'width:44px;height:44px;border-radius:50%;border:none;' +
+        'background:rgba(0,0,0,0.55);color:#fff;font-size:24px;line-height:44px;' +
+        'text-align:center;cursor:pointer;padding:0;opacity:0.9;' +
+        'box-shadow:0 2px 8px rgba(0,0,0,0.5);">✕</button>' +
       '<button id="apt-lb-prev" style="' +
         'position:absolute;left:0;top:50%;transform:translateY(-50%);' +
         'background:none;border:none;color:#fff;font-size:72px;' +
@@ -547,7 +550,10 @@ _components.html("""
     function _lbNext()  { if (_lbIdx < _lbImgs.length - 1) { _lbIdx++; _lbRender(); } }
 
     lb.onclick = function(e) { if (e.target === lb) _lbClose(); };
-    pd.getElementById('apt-lb-x').onclick    = _lbClose;
+    var _lbX = pd.getElementById('apt-lb-x');
+    _lbX.onclick      = function(e) { e.stopPropagation(); _lbClose(); };
+    _lbX.onmouseenter = function() { this.style.opacity = '1';   this.style.background = 'rgba(0,0,0,0.85)'; };
+    _lbX.onmouseleave = function() { this.style.opacity = '0.9'; this.style.background = 'rgba(0,0,0,0.55)'; };
     pd.getElementById('apt-lb-prev').onclick = function(e) { e.stopPropagation(); _lbPrev(); };
     pd.getElementById('apt-lb-next').onclick = function(e) { e.stopPropagation(); _lbNext(); };
     pd.addEventListener('keydown', function(e) {
