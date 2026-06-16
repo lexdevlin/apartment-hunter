@@ -255,15 +255,14 @@ _PIN_DEFAULT  = "#1e78dc"   # blue
 
 
 def _pin_icon(color: str) -> folium.DivIcon:
-    """A small circular map pin (≈40% smaller than folium's default marker icon)."""
+    """A small colored star marker for a listing."""
     return folium.DivIcon(
         html=(
-            f'<div style="width:16px;height:16px;border-radius:50%;'
-            f'background:{color};border:2px solid #fff;'
-            f'box-shadow:0 1px 3px rgba(0,0,0,0.55)"></div>'
+            f'<div style="font-size:21px;color:{color};line-height:1;'
+            f'text-shadow:0 1px 2px rgba(0,0,0,0.6),0 0 2px #fff">★</div>'
         ),
-        icon_size=(16, 16),
-        icon_anchor=(8, 8),
+        icon_size=(21, 21),
+        icon_anchor=(10, 11),
     )
 
 
@@ -293,7 +292,7 @@ def _build_all_map(signature: tuple) -> folium.Map:
         label = f"🚇 {s['name']} ({s['routes']})" if s["routes"] else f"🚇 {s['name']}"
         folium.CircleMarker(
             location=[s["lat"], s["lon"]],
-            radius=4,
+            radius=6,
             color=color,
             fill=True,
             fill_color=color,
