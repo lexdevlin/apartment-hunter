@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 import folium
+from streamlit_folium import st_folium
 import streamlit.components.v1 as _components
 import pandas as pd
 import streamlit as st
@@ -247,20 +248,37 @@ def _listing_map_html(lat: float, lon: float) -> str:
     return _listing_map(lat, lon).get_root().render()
 
 
-def _all_listings_map(listings: list[dict]) -> folium.Map:
-    """Build one Folium map showing every listing plus the full subway network.
+# Listing-marker colors for the all-listings map.
+_PIN_PRIORITY = "#d63b3b"   # red
+_PIN_SAVED    = "#2e9e5b"   # green
+_PIN_DEFAULT  = "#1e78dc"   # blue
 
-    Listing markers carry a hover tooltip (price · date listed) and a click popup
-    (price, date, neighborhood + link to the source listing). Every station from
-    subway_stations.csv is drawn as a small MTA-colored circle.
+
+def _pin_icon(color: str) -> folium.DivIcon:
+    """A small circular map pin (≈40% smaller than folium's default marker icon)."""
+    return folium.DivIcon(
+        html=(
+            f'<div style="width:16px;height:16px;border-radius:50%;'
+            f'background:{color};border:2px solid #fff;'
+            f'box-shadow:0 1px 3px rgba(0,0,0,0.55)"></div>'
+        ),
+        icon_size=(16, 16),
+        icon_anchor=(8, 8),
+    )
+
+
+@st.cache_resource(ttl=600, max_entries=8, show_spinner="Building map…")
+def _build_all_map(signature: tuple) -> folium.Map:
+    """Build one Folium map with every filtered listing plus the full subway network.
+
+    `signature` is a tuple of per-listing tuples built by the caller from the
+    filtered set, so the cache key changes whenever that set (or any listing's
+    price / status / cover image) changes. Cached as a resource — the same map
+    object is reused across reruns (e.g. a marker click) when nothing changed.
     """
-    coords = [
-        (float(l["latitude"]), float(l["longitude"]), l)
-        for l in listings
-        if l.get("latitude") is not None and l.get("longitude") is not None
-    ]
+    coords = [(lat, lon) for (_u, lat, lon, *_rest) in signature
+              if lat is not None and lon is not None]
 
-    # Center on the listings' centroid, falling back to central Brooklyn.
     if coords:
         center = [sum(c[0] for c in coords) / len(coords),
                   sum(c[1] for c in coords) / len(coords)]
@@ -284,35 +302,36 @@ def _all_listings_map(listings: list[dict]) -> folium.Map:
             tooltip=label,
         ).add_to(m)
 
-    # Listing markers — priority listings in red, others in blue.
-    for lat, lon, l in coords:
-        price_s = _fmt_price(l.get("price"))
-        date_s  = _fmt_date_listed((l.get("date_listed") or "")[:10])
-        hood    = l.get("neighborhood") or ""
-        url     = l.get("url") or ""
-        source  = _source_label(l.get("source", ""))
+    # Listing markers — small circular pins (red=priority, green=saved, blue=other).
+    for (url, lat, lon, price, date_listed, hood, source,
+         is_priority, status, cover) in signature:
+        if lat is None or lon is None:
+            continue
+        price_s = _fmt_price(price)
+        date_s  = _fmt_date_listed((date_listed or "")[:10])
+        color   = (_PIN_PRIORITY if is_priority
+                   else _PIN_SAVED if status == "saved"
+                   else _PIN_DEFAULT)
 
         tip = price_s + (f" · listed {date_s}" if date_s else "")
         popup_html = (
-            f'<div style="font-size:0.85rem;min-width:160px">'
-            f'<b>{price_s}</b><br>'
+            '<div style="font-size:0.85rem;width:180px">'
+            + (f'<img src="{cover}" style="width:100%;height:118px;object-fit:cover;'
+               f'border-radius:4px;margin-bottom:5px"/>' if cover else "")
+            + f'<b>{price_s}</b><br>'
             + (f'Listed {date_s}<br>' if date_s else "")
-            + (f'{hood}<br>' if hood else "")
-            + (f'<a href="{url}" target="_blank">View on {source} ↗</a>' if url else "")
+            + (f'{hood}' if hood else "")
             + '</div>'
         )
         folium.Marker(
             location=[lat, lon],
             tooltip=tip,
-            popup=folium.Popup(popup_html, max_width=260),
-            icon=folium.Icon(
-                color="red" if l.get("is_priority") else "blue",
-                icon="home",
-            ),
+            popup=folium.Popup(popup_html, max_width=220),
+            icon=_pin_icon(color),
         ).add_to(m)
 
     # Fit the viewport to the listings (ignore stations so it doesn't zoom out to
-    # the whole network when listings are clustered in a few neighborhoods).
+    # the whole network when listings cluster in a few neighborhoods).
     if len(coords) > 1:
         lats = [c[0] for c in coords]
         lons = [c[1] for c in coords]
@@ -320,24 +339,6 @@ def _all_listings_map(listings: list[dict]) -> folium.Map:
                      padding=(30, 30))
 
     return m
-
-
-@st.cache_data(ttl=300, show_spinner="Building map…")
-def _all_listings_map_html(signature: tuple) -> str:
-    """Render the all-listings map to standalone HTML, memoised on the filtered set.
-
-    `signature` is a tuple of per-listing tuples (built by the caller from the
-    filtered listings) so the cache key changes whenever the filtered set does.
-    """
-    listings = [
-        {
-            "url": url, "latitude": lat, "longitude": lon, "price": price,
-            "date_listed": date_listed, "neighborhood": hood, "source": source,
-            "is_priority": is_priority,
-        }
-        for (url, lat, lon, price, date_listed, hood, source, is_priority) in signature
-    ]
-    return _all_listings_map(listings).get_root().render()
 
 
 def _set_status(url: str, status: "str | None") -> None:
@@ -527,30 +528,6 @@ elif sort_by == "Score + Date listed":
         -_date_ts(l.get("date_listed")),
     ))
 # "Score" → keep the priority/score/date_found order from load_listings()
-
-# ---------------------------------------------------------------------------
-# Map view — all filtered listings on a single map, then stop (skip the list UI)
-# ---------------------------------------------------------------------------
-
-if view == "Map":
-    st.markdown(f"### 🗺️ {len(filtered)} listing(s) on the map")
-    st.caption(
-        "Hover a marker for price & date listed; click it for details and a link. "
-        "Red markers are priority listings. Use the sidebar filters to narrow the set."
-    )
-    if not filtered:
-        st.info("No listings match the current filters.")
-    else:
-        _sig = tuple(
-            (
-                l.get("url"), l.get("latitude"), l.get("longitude"), l.get("price"),
-                l.get("date_listed"), l.get("neighborhood"), l.get("source"),
-                l.get("is_priority", False),
-            )
-            for l in filtered
-        )
-        _components.html(_all_listings_map_html(_sig), height=720)
-    st.stop()
 
 # ---------------------------------------------------------------------------
 # Summary metrics
@@ -836,6 +813,111 @@ def _image_carousel(images: list[str], key: str) -> None:
 }})();
 </script>
 """, height=380)
+
+
+# ---------------------------------------------------------------------------
+# Map view — all filtered listings on one map (then stop; skip the list UI)
+# ---------------------------------------------------------------------------
+
+if view == "Map":
+    st.markdown(f"### 🗺️ {len(filtered)} listing(s) on the map")
+    st.caption(
+        "Hover a marker for price & date listed; click one to open its photos and "
+        "save/skip it below. Red = priority, green = saved, blue = other. "
+        "Use the sidebar filters to narrow the set."
+    )
+
+    if not filtered:
+        st.info("No listings match the current filters.")
+        st.stop()
+
+    def _cover(listing: dict) -> str:
+        imgs = [u.strip() for u in (listing.get("image_url") or "").split(",") if u.strip()]
+        return imgs[0] if imgs else ""
+
+    # Signature drives the cached map build; include status + cover so the map
+    # rebuilds (and a saved marker turns green) right after a Save/Skip.
+    _sig = tuple(
+        (
+            l.get("url"),
+            None if l.get("latitude")  is None else float(l["latitude"]),
+            None if l.get("longitude") is None else float(l["longitude"]),
+            l.get("price"), l.get("date_listed"), l.get("neighborhood"),
+            l.get("source"), bool(l.get("is_priority")), l.get("user_status"),
+            _cover(l),
+        )
+        for l in filtered
+    )
+
+    # Lookup from rounded coords → listing, for resolving the clicked marker.
+    _coord_lookup: dict = {}
+    for l in filtered:
+        if l.get("latitude") is not None and l.get("longitude") is not None:
+            _coord_lookup[(round(float(l["latitude"]), 5),
+                           round(float(l["longitude"]), 5))] = l
+
+    # ── Selected-listing panel (the click "popup": photos + save/skip) ──────────
+    _clicked = (st.session_state.get("_map_click") or {})
+    _selected = None
+    if _clicked:
+        _selected = _coord_lookup.get((round(_clicked.get("lat", 0), 5),
+                                       round(_clicked.get("lng", 0), 5)))
+
+    if _selected:
+        s_url    = _selected.get("url", "")
+        s_addr   = _selected.get("address") or _selected.get("title") or "Listing"
+        s_status = _selected.get("user_status")
+        s_imgs   = [u.strip() for u in (_selected.get("image_url") or "").split(",") if u.strip()]
+        with st.container(border=True):
+            st.markdown(f"#### 📍 {('★ ' if _selected.get('is_priority') else '')}{s_addr}")
+            meta = [_source_label(_selected.get("source", "")), _fmt_price(_selected.get("price"))]
+            _dl = _fmt_date_listed((_selected.get("date_listed") or "")[:10])
+            if _selected.get("neighborhood"):
+                meta.insert(1, _selected["neighborhood"])
+            if _dl:
+                meta.append(f"Listed {_dl}")
+            st.caption("  ·  ".join(meta))
+
+            _image_carousel(s_imgs, key="map_" + (_selected.get("listing_id") or s_url[-12:]))
+
+            b_link, b_save, b_skip, b_undo = st.columns([2, 1, 1, 1])
+            with b_link:
+                st.link_button(f"View on {_source_label(_selected.get('source',''))} ↗",
+                               s_url, use_container_width=True)
+            with b_save:
+                if st.button("★ Saved" if s_status == "saved" else "Save",
+                             key=f"map_save_{s_url}",
+                             type="primary" if s_status == "saved" else "secondary",
+                             use_container_width=True):
+                    _set_status(s_url, "saved")
+                    st.rerun()
+            with b_skip:
+                if st.button("Skipped" if s_status == "skipped" else "Skip",
+                             key=f"map_skip_{s_url}", use_container_width=True):
+                    _set_status(s_url, "skipped")
+                    st.rerun()
+            with b_undo:
+                if st.button("Undo", key=f"map_undo_{s_url}",
+                             use_container_width=True, disabled=s_status is None):
+                    _set_status(s_url, None)
+                    st.rerun()
+
+    # ── The map ─────────────────────────────────────────────────────────────────
+    _map_state = st_folium(
+        _build_all_map(_sig),
+        use_container_width=True,
+        height=640,
+        returned_objects=["last_object_clicked"],
+        key="all_map",
+    )
+
+    # Persist the latest marker click so the panel survives the save/skip rerun.
+    _new_click = (_map_state or {}).get("last_object_clicked")
+    if _new_click and _new_click != st.session_state.get("_map_click"):
+        st.session_state["_map_click"] = _new_click
+        st.rerun()
+
+    st.stop()
 
 
 # ---------------------------------------------------------------------------
