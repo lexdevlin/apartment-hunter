@@ -823,7 +823,7 @@ if view == "Map":
     st.markdown(f"### 🗺️ {len(filtered)} listing(s) on the map")
     st.caption(
         "Hover a marker for price & date listed; click one to open its photos and "
-        "save/skip it below. Red = priority, green = saved, blue = other. "
+        "save/skip below the map. Red = priority, green = saved, blue = other. "
         "Use the sidebar filters to narrow the set."
     )
 
@@ -856,53 +856,11 @@ if view == "Map":
             _coord_lookup[(round(float(l["latitude"]), 5),
                            round(float(l["longitude"]), 5))] = l
 
-    # ── Selected-listing panel (the click "popup": photos + save/skip) ──────────
-    _clicked = (st.session_state.get("_map_click") or {})
-    _selected = None
-    if _clicked:
-        _selected = _coord_lookup.get((round(_clicked.get("lat", 0), 5),
-                                       round(_clicked.get("lng", 0), 5)))
-
-    if _selected:
-        s_url    = _selected.get("url", "")
-        s_addr   = _selected.get("address") or _selected.get("title") or "Listing"
-        s_status = _selected.get("user_status")
-        s_imgs   = [u.strip() for u in (_selected.get("image_url") or "").split(",") if u.strip()]
-        with st.container(border=True):
-            st.markdown(f"#### 📍 {('★ ' if _selected.get('is_priority') else '')}{s_addr}")
-            meta = [_source_label(_selected.get("source", "")), _fmt_price(_selected.get("price"))]
-            _dl = _fmt_date_listed((_selected.get("date_listed") or "")[:10])
-            if _selected.get("neighborhood"):
-                meta.insert(1, _selected["neighborhood"])
-            if _dl:
-                meta.append(f"Listed {_dl}")
-            st.caption("  ·  ".join(meta))
-
-            _image_carousel(s_imgs, key="map_" + (_selected.get("listing_id") or s_url[-12:]))
-
-            b_link, b_save, b_skip, b_undo = st.columns([2, 1, 1, 1])
-            with b_link:
-                st.link_button(f"View on {_source_label(_selected.get('source',''))} ↗",
-                               s_url, use_container_width=True)
-            with b_save:
-                if st.button("★ Saved" if s_status == "saved" else "Save",
-                             key=f"map_save_{s_url}",
-                             type="primary" if s_status == "saved" else "secondary",
-                             use_container_width=True):
-                    _set_status(s_url, "saved")
-                    st.rerun()
-            with b_skip:
-                if st.button("Skipped" if s_status == "skipped" else "Skip",
-                             key=f"map_skip_{s_url}", use_container_width=True):
-                    _set_status(s_url, "skipped")
-                    st.rerun()
-            with b_undo:
-                if st.button("Undo", key=f"map_undo_{s_url}",
-                             use_container_width=True, disabled=s_status is None):
-                    _set_status(s_url, None)
-                    st.rerun()
-
     # ── The map ─────────────────────────────────────────────────────────────────
+    # Rendered first so the selected-listing card appears *below* it. Reading the
+    # click straight from st_folium's return (no manual st.rerun) keeps the map's
+    # pan/zoom stable between clicks — the cached map object is unchanged, so
+    # st_folium doesn't re-fit the view.
     _map_state = st_folium(
         _build_all_map(_sig),
         use_container_width=True,
@@ -911,11 +869,55 @@ if view == "Map":
         key="all_map",
     )
 
-    # Persist the latest marker click so the panel survives the save/skip rerun.
-    _new_click = (_map_state or {}).get("last_object_clicked")
-    if _new_click and _new_click != st.session_state.get("_map_click"):
-        st.session_state["_map_click"] = _new_click
-        st.rerun()
+    # ── Selected-listing card (below the map, like a normal list card) ──────────
+    _clicked = (_map_state or {}).get("last_object_clicked") or {}
+    _selected = None
+    if _clicked:
+        _selected = _coord_lookup.get((round(_clicked.get("lat", 0), 5),
+                                       round(_clicked.get("lng", 0), 5)))
+
+    st.divider()
+    if not _selected:
+        st.caption("👆 Click a marker to open the listing here.")
+        st.stop()
+
+    s_url    = _selected.get("url", "")
+    s_addr   = _selected.get("address") or _selected.get("title") or "Listing"
+    s_status = _selected.get("user_status")
+    s_imgs   = [u.strip() for u in (_selected.get("image_url") or "").split(",") if u.strip()]
+    with st.container(border=True):
+        st.markdown(f"#### {('★ ' if _selected.get('is_priority') else '')}{s_addr}")
+        meta = [_source_label(_selected.get("source", "")), _fmt_price(_selected.get("price"))]
+        _dl = _fmt_date_listed((_selected.get("date_listed") or "")[:10])
+        if _selected.get("neighborhood"):
+            meta.insert(1, _selected["neighborhood"])
+        if _dl:
+            meta.append(f"Listed {_dl}")
+        st.caption("  ·  ".join(meta))
+
+        _image_carousel(s_imgs, key="map_" + (_selected.get("listing_id") or s_url[-12:]))
+
+        b_link, b_save, b_skip, b_undo = st.columns([2, 1, 1, 1])
+        with b_link:
+            st.link_button(f"View on {_source_label(_selected.get('source',''))} ↗",
+                           s_url, use_container_width=True)
+        with b_save:
+            if st.button("★ Saved" if s_status == "saved" else "Save",
+                         key=f"map_save_{s_url}",
+                         type="primary" if s_status == "saved" else "secondary",
+                         use_container_width=True):
+                _set_status(s_url, "saved")
+                st.rerun()
+        with b_skip:
+            if st.button("Skipped" if s_status == "skipped" else "Skip",
+                         key=f"map_skip_{s_url}", use_container_width=True):
+                _set_status(s_url, "skipped")
+                st.rerun()
+        with b_undo:
+            if st.button("Undo", key=f"map_undo_{s_url}",
+                         use_container_width=True, disabled=s_status is None):
+                _set_status(s_url, None)
+                st.rerun()
 
     st.stop()
 
