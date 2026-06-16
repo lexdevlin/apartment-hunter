@@ -247,6 +247,99 @@ def _listing_map_html(lat: float, lon: float) -> str:
     return _listing_map(lat, lon).get_root().render()
 
 
+def _all_listings_map(listings: list[dict]) -> folium.Map:
+    """Build one Folium map showing every listing plus the full subway network.
+
+    Listing markers carry a hover tooltip (price · date listed) and a click popup
+    (price, date, neighborhood + link to the source listing). Every station from
+    subway_stations.csv is drawn as a small MTA-colored circle.
+    """
+    coords = [
+        (float(l["latitude"]), float(l["longitude"]), l)
+        for l in listings
+        if l.get("latitude") is not None and l.get("longitude") is not None
+    ]
+
+    # Center on the listings' centroid, falling back to central Brooklyn.
+    if coords:
+        center = [sum(c[0] for c in coords) / len(coords),
+                  sum(c[1] for c in coords) / len(coords)]
+    else:
+        center = [40.68, -73.94]
+
+    m = folium.Map(location=center, zoom_start=13, tiles="CartoDB positron")
+
+    # Subway stations — small colored circles, drawn first so listings sit on top.
+    for s in _load_stations():
+        color = _station_color(s["routes"])
+        label = f"🚇 {s['name']} ({s['routes']})" if s["routes"] else f"🚇 {s['name']}"
+        folium.CircleMarker(
+            location=[s["lat"], s["lon"]],
+            radius=4,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.9,
+            weight=1,
+            tooltip=label,
+        ).add_to(m)
+
+    # Listing markers — priority listings in red, others in blue.
+    for lat, lon, l in coords:
+        price_s = _fmt_price(l.get("price"))
+        date_s  = _fmt_date_listed((l.get("date_listed") or "")[:10])
+        hood    = l.get("neighborhood") or ""
+        url     = l.get("url") or ""
+        source  = _source_label(l.get("source", ""))
+
+        tip = price_s + (f" · listed {date_s}" if date_s else "")
+        popup_html = (
+            f'<div style="font-size:0.85rem;min-width:160px">'
+            f'<b>{price_s}</b><br>'
+            + (f'Listed {date_s}<br>' if date_s else "")
+            + (f'{hood}<br>' if hood else "")
+            + (f'<a href="{url}" target="_blank">View on {source} ↗</a>' if url else "")
+            + '</div>'
+        )
+        folium.Marker(
+            location=[lat, lon],
+            tooltip=tip,
+            popup=folium.Popup(popup_html, max_width=260),
+            icon=folium.Icon(
+                color="red" if l.get("is_priority") else "blue",
+                icon="home",
+            ),
+        ).add_to(m)
+
+    # Fit the viewport to the listings (ignore stations so it doesn't zoom out to
+    # the whole network when listings are clustered in a few neighborhoods).
+    if len(coords) > 1:
+        lats = [c[0] for c in coords]
+        lons = [c[1] for c in coords]
+        m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]],
+                     padding=(30, 30))
+
+    return m
+
+
+@st.cache_data(ttl=300, show_spinner="Building map…")
+def _all_listings_map_html(signature: tuple) -> str:
+    """Render the all-listings map to standalone HTML, memoised on the filtered set.
+
+    `signature` is a tuple of per-listing tuples (built by the caller from the
+    filtered listings) so the cache key changes whenever the filtered set does.
+    """
+    listings = [
+        {
+            "url": url, "latitude": lat, "longitude": lon, "price": price,
+            "date_listed": date_listed, "neighborhood": hood, "source": source,
+            "is_priority": is_priority,
+        }
+        for (url, lat, lon, price, date_listed, hood, source, is_priority) in signature
+    ]
+    return _all_listings_map(listings).get_root().render()
+
+
 def _set_status(url: str, status: "str | None") -> None:
     _get_client().table("listings").update({"user_status": status}).eq("url", url).execute()
     # Reflect the change immediately via a session overlay instead of clearing the
@@ -325,6 +418,9 @@ def _source_label(source: str) -> str:
 # ---------------------------------------------------------------------------
 
 st.sidebar.title("🏠 Apartment Hunter")
+
+view = st.sidebar.radio("View", ["List", "Map"], index=0, horizontal=True)
+st.sidebar.markdown("---")
 
 status_view = st.sidebar.radio(
     "Show listings",
@@ -431,6 +527,30 @@ elif sort_by == "Score + Date listed":
         -_date_ts(l.get("date_listed")),
     ))
 # "Score" → keep the priority/score/date_found order from load_listings()
+
+# ---------------------------------------------------------------------------
+# Map view — all filtered listings on a single map, then stop (skip the list UI)
+# ---------------------------------------------------------------------------
+
+if view == "Map":
+    st.markdown(f"### 🗺️ {len(filtered)} listing(s) on the map")
+    st.caption(
+        "Hover a marker for price & date listed; click it for details and a link. "
+        "Red markers are priority listings. Use the sidebar filters to narrow the set."
+    )
+    if not filtered:
+        st.info("No listings match the current filters.")
+    else:
+        _sig = tuple(
+            (
+                l.get("url"), l.get("latitude"), l.get("longitude"), l.get("price"),
+                l.get("date_listed"), l.get("neighborhood"), l.get("source"),
+                l.get("is_priority", False),
+            )
+            for l in filtered
+        )
+        _components.html(_all_listings_map_html(_sig), height=720)
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Summary metrics
