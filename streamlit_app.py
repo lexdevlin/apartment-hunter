@@ -848,12 +848,12 @@ if view == "Map":
         for l in filtered
     )
 
-    # Lookup from rounded coords → listing, for resolving the clicked marker.
-    _coord_lookup: dict = {}
-    for l in filtered:
-        if l.get("latitude") is not None and l.get("longitude") is not None:
-            _coord_lookup[(round(float(l["latitude"]), 5),
-                           round(float(l["longitude"]), 5))] = l
+    # Listing points, for resolving a clicked marker back to its listing.
+    _listing_pts = [
+        (float(l["latitude"]), float(l["longitude"]), l)
+        for l in filtered
+        if l.get("latitude") is not None and l.get("longitude") is not None
+    ]
 
     # ── The map ─────────────────────────────────────────────────────────────────
     # Rendered first so the selected-listing card appears *below* it. Reading the
@@ -869,11 +869,15 @@ if view == "Map":
     )
 
     # ── Selected-listing card (below the map, like a normal list card) ──────────
+    # Match the clicked marker to the nearest listing (robust to float drift);
+    # clicks on subway circles fall outside the threshold and select nothing.
     _clicked = (_map_state or {}).get("last_object_clicked") or {}
     _selected = None
-    if _clicked:
-        _selected = _coord_lookup.get((round(_clicked.get("lat", 0), 5),
-                                       round(_clicked.get("lng", 0), 5)))
+    _cl, _cn = _clicked.get("lat"), _clicked.get("lng")
+    if _cl is not None and _cn is not None and _listing_pts:
+        _best = min(_listing_pts, key=lambda p: (p[0] - _cl) ** 2 + (p[1] - _cn) ** 2)
+        if (_best[0] - _cl) ** 2 + (_best[1] - _cn) ** 2 <= 0.0006 ** 2:
+            _selected = _best[2]
 
     st.divider()
     if not _selected:
