@@ -868,6 +868,10 @@ if view == "Map":
         key="all_map",
     )
 
+    # TEMP DEBUG — remove once click handling is confirmed.
+    with st.expander("🔧 map click debug", expanded=True):
+        st.write(_map_state)
+
     # ── Selected-listing card (below the map, like a normal list card) ──────────
     # Match the clicked marker to the nearest listing (robust to float drift);
     # clicks on subway circles fall outside the threshold and select nothing.
