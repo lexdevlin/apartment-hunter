@@ -248,27 +248,15 @@ def _listing_map_html(lat: float, lon: float) -> str:
     return _listing_map(lat, lon).get_root().render()
 
 
-# Listing-marker colors for the all-listings map.
-_PIN_PRIORITY = "#d63b3b"   # red
-_PIN_SAVED    = "#2e9e5b"   # green
-_PIN_DEFAULT  = "#1e78dc"   # blue
-
-
-def _pin_icon(color: str) -> folium.DivIcon:
-    """A small colored star marker for a listing.
-
-    Purely decorative: `pointer-events:none` lets clicks fall through to the
-    CircleMarker hit-target beneath it (st_folium reports CircleMarker clicks but
-    NOT custom DivIcon-marker clicks)."""
-    return folium.DivIcon(
-        html=(
-            f'<div style="font-size:21px;color:{color};line-height:1;'
-            f'pointer-events:none;'
-            f'text-shadow:0 1px 2px rgba(0,0,0,0.6),0 0 2px #fff">★</div>'
-        ),
-        icon_size=(21, 21),
-        icon_anchor=(10, 11),
-    )
+# Listing-marker colors (folium.Icon named colors — the only colors a standard
+# image-icon marker supports; these are the marker type st_folium reliably
+# reports clicks for, unlike custom DivIcon/HTML markers).
+def _pin_color(is_priority: bool, status: "str | None") -> str:
+    if is_priority:
+        return "red"
+    if status == "saved":
+        return "green"
+    return "blue"
 
 
 @st.cache_resource(ttl=600, max_entries=8, show_spinner="Building map…")
@@ -291,12 +279,6 @@ def _build_all_map(signature: tuple) -> folium.Map:
 
     m = folium.Map(location=center, zoom_start=13, tiles="CartoDB positron")
 
-    # Make all DivIcon markers (the decorative stars) click-through, so a click on
-    # a star reaches the CircleMarker hit-target in the SVG pane beneath it.
-    m.get_root().header.add_child(folium.Element(
-        "<style>.leaflet-marker-icon{pointer-events:none;}</style>"
-    ))
-
     # Subway stations — small colored circles, drawn first so listings sit on top.
     for s in _load_stations():
         color = _station_color(s["routes"])
@@ -312,16 +294,15 @@ def _build_all_map(signature: tuple) -> folium.Map:
             tooltip=label,
         ).add_to(m)
 
-    # Listing markers — small circular pins (red=priority, green=saved, blue=other).
+    # Listing markers — star pins (red=priority, green=saved, blue=other). Standard
+    # image-icon folium.Marker, which st_folium reports clicks for (DivIcon markers
+    # don't report clicks, so the listing card couldn't resolve which star was hit).
     for (url, lat, lon, price, date_listed, hood, source,
          is_priority, status, cover) in signature:
         if lat is None or lon is None:
             continue
         price_s = _fmt_price(price)
         date_s  = _fmt_date_listed((date_listed or "")[:10])
-        color   = (_PIN_PRIORITY if is_priority
-                   else _PIN_SAVED if status == "saved"
-                   else _PIN_DEFAULT)
 
         tip = price_s + (f" · listed {date_s}" if date_s else "")
         popup_html = (
@@ -333,23 +314,12 @@ def _build_all_map(signature: tuple) -> folium.Map:
             + (f'{hood}' if hood else "")
             + '</div>'
         )
-        # Transparent CircleMarker = the actual click/hover target (st_folium
-        # reports CircleMarker clicks via last_object_clicked); the star on top is
-        # decorative only (pointer-events:none).
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=12,
-            color=color,
-            weight=0,
-            fill=True,
-            fill_color=color,
-            fill_opacity=0.01,
-            tooltip=tip,
-            popup=folium.Popup(popup_html, max_width=220),
-        ).add_to(m)
         folium.Marker(
             location=[lat, lon],
-            icon=_pin_icon(color),
+            tooltip=tip,
+            popup=folium.Popup(popup_html, max_width=220),
+            icon=folium.Icon(color=_pin_color(is_priority, status),
+                             icon="star", prefix="fa", icon_color="white"),
         ).add_to(m)
 
     # Fit the viewport to the listings (ignore stations so it doesn't zoom out to
