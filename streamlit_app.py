@@ -973,21 +973,41 @@ if view == "Map":
     ]
 
     # ── The map ─────────────────────────────────────────────────────────────────
-    # Rendered first so the selected-listing card appears *below* it. Reading the
-    # click straight from st_folium's return (no manual st.rerun) keeps the map's
-    # pan/zoom stable between clicks — the cached map object is unchanged, so
-    # st_folium doesn't re-fit the view.
+    # Rendered first so the selected-listing card appears *below* it.
+    #
+    # The map is rebuilt fresh each run (required so st_folium reports clicks), so
+    # its fit_bounds would otherwise snap the view back on every click. To hold the
+    # view: capture st_folium's reported center/zoom and feed them back in. Reset
+    # that saved view when the *set* of listings changes (keyed on URLs, so a
+    # Save/Skip — which changes status but not the set — doesn't reframe).
+    _frame_key = hash(tuple(sorted(l.get("url", "") for l in filtered)))
+    if st.session_state.get("_map_frame_key") != _frame_key:
+        st.session_state["_map_frame_key"] = _frame_key
+        st.session_state.pop("_map_center", None)
+        st.session_state.pop("_map_zoom", None)
+
     _map_state = st_folium(
         _build_all_map(_sig),
         use_container_width=True,
         height=640,
-        # Restrict the returned payload — returning the full map state for a
-        # ~500-marker map makes each round-trip take minutes. These are the only
-        # fields we read.
-        returned_objects=["last_object_clicked", "last_object_clicked_tooltip",
-                          "last_clicked"],
+        center=st.session_state.get("_map_center"),
+        zoom=st.session_state.get("_map_zoom"),
+        # Keep the returned payload small — returning the full state for a
+        # ~500-marker map makes each round-trip take minutes. center/zoom let us
+        # persist the view; last_object_clicked resolves the selected listing.
+        returned_objects=["last_object_clicked", "center", "zoom"],
         key="all_map",
     )
+
+    # Remember the current view so the next rerun (e.g. a star click) holds it.
+    _ms = _map_state or {}
+    _ctr = _ms.get("center")
+    if isinstance(_ctr, dict) and _ctr.get("lat") is not None:
+        st.session_state["_map_center"] = [_ctr["lat"], _ctr["lng"]]
+    elif isinstance(_ctr, (list, tuple)) and len(_ctr) == 2:
+        st.session_state["_map_center"] = [_ctr[0], _ctr[1]]
+    if _ms.get("zoom") is not None:
+        st.session_state["_map_zoom"] = _ms["zoom"]
 
     # ── Selected-listing card (below the map, like a normal list card) ──────────
     # st_folium returns the clicked CircleMarker's exact center, so match to the
