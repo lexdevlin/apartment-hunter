@@ -251,10 +251,12 @@ def _listing_map_html(lat: float, lon: float) -> str:
 # image-icon marker supports; these are the marker type st_folium reliably
 # reports clicks for, unlike custom DivIcon/HTML markers).
 def _pin_color(is_priority: bool, status: "str | None") -> str:
-    if is_priority:
-        return "red"
+    # Saved wins over priority: any saved listing is green so it's easy to spot;
+    # priority-but-not-saved is red; everything else blue.
     if status == "saved":
         return "green"
+    if is_priority:
+        return "red"
     return "blue"
 
 
@@ -295,14 +297,14 @@ def _build_all_map(signature: tuple) -> folium.Map:
     # Listing markers — star pins (red=priority, green=saved, blue=other). Standard
     # image-icon folium.Marker, which st_folium reports clicks for (DivIcon markers
     # don't report clicks, so the listing card couldn't resolve which star was hit).
-    for (url, lat, lon, price, date_listed, hood, source,
+    for (url, lat, lon, price, date_listed, address, source,
          is_priority, status, cover) in signature:
         if lat is None or lon is None:
             continue
         price_s = _fmt_price(price)
         date_s  = _fmt_date_listed((date_listed or "")[:10])
 
-        # Rich hover tooltip (photo + price/date/neighborhood). Tooltip, not popup:
+        # Rich hover tooltip (photo + price/date/address). Tooltip, not popup:
         # a popup opens on click and swallows it, so st_folium never reports the
         # click. The full listing detail still renders in the card below the map.
         tip_html = (
@@ -311,7 +313,7 @@ def _build_all_map(signature: tuple) -> folium.Map:
                f'border-radius:4px;display:block;margin-bottom:5px"/>' if cover else "")
             + f'<div style="font-weight:700;font-size:0.92rem">{price_s}</div>'
             + (f'<div style="font-size:0.8rem">Listed {date_s}</div>' if date_s else "")
-            + (f'<div style="font-size:0.8rem">{hood}</div>' if hood else "")
+            + (f'<div style="font-size:0.8rem">{address}</div>' if address else "")
             + '</div>'
         )
         folium.Marker(
@@ -958,7 +960,8 @@ if view == "Map":
             l.get("url"),
             None if l.get("latitude")  is None else float(l["latitude"]),
             None if l.get("longitude") is None else float(l["longitude"]),
-            l.get("price"), l.get("date_listed"), l.get("neighborhood"),
+            l.get("price"), l.get("date_listed"),
+            (l.get("address") or l.get("title") or ""),
             l.get("source"), bool(l.get("is_priority")), l.get("user_status"),
             _cover(l),
         )
