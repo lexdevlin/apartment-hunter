@@ -259,14 +259,13 @@ def _pin_color(is_priority: bool, status: "str | None") -> str:
     return "blue"
 
 
-@st.cache_resource(ttl=600, max_entries=8, show_spinner="Building map…")
 def _build_all_map(signature: tuple) -> folium.Map:
     """Build one Folium map with every filtered listing plus the full subway network.
 
-    `signature` is a tuple of per-listing tuples built by the caller from the
-    filtered set, so the cache key changes whenever that set (or any listing's
-    price / status / cover image) changes. Cached as a resource — the same map
-    object is reused across reruns (e.g. a marker click) when nothing changed.
+    Built fresh on every run (NOT cached): st_folium fails to report clicks
+    (last_object_clicked / last_clicked stay null) when handed a reused/cached
+    folium.Map instance. `_load_stations()` is still cached, so the per-run cost
+    is just iterating the in-memory station list + listings.
     """
     coords = [(lat, lon) for (_u, lat, lon, *_rest) in signature
               if lat is not None and lon is not None]
