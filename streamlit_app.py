@@ -303,13 +303,21 @@ def _build_all_map(signature: tuple) -> folium.Map:
         price_s = _fmt_price(price)
         date_s  = _fmt_date_listed((date_listed or "")[:10])
 
-        # Hover tooltip only — no in-map popup. The full listing detail is shown in
-        # the card below the map; an open Leaflet popup can also swallow the click
-        # so st_folium never reports last_object_clicked.
-        tip = price_s + (f" · listed {date_s}" if date_s else "")
+        # Rich hover tooltip (photo + price/date/neighborhood). Tooltip, not popup:
+        # a popup opens on click and swallows it, so st_folium never reports the
+        # click. The full listing detail still renders in the card below the map.
+        tip_html = (
+            '<div style="width:170px">'
+            + (f'<img src="{cover}" style="width:100%;height:108px;object-fit:cover;'
+               f'border-radius:4px;display:block;margin-bottom:5px"/>' if cover else "")
+            + f'<div style="font-weight:700;font-size:0.92rem">{price_s}</div>'
+            + (f'<div style="font-size:0.8rem">Listed {date_s}</div>' if date_s else "")
+            + (f'<div style="font-size:0.8rem">{hood}</div>' if hood else "")
+            + '</div>'
+        )
         folium.Marker(
             location=[lat, lon],
-            tooltip=tip,
+            tooltip=folium.Tooltip(tip_html, sticky=False),
             icon=folium.Icon(color=_pin_color(is_priority, status),
                              icon="star", prefix="fa", icon_color="white"),
         ).add_to(m)
@@ -800,14 +808,139 @@ def _image_carousel(images: list[str], key: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Listing card (shared by the List view and the Map view's selected listing)
+# ---------------------------------------------------------------------------
+
+def _render_listing_card(listing: dict) -> None:
+    """Render one listing as a bordered card. Used by both the List view and the
+    Map view's selected-listing panel so the two stay visually identical."""
+    url        = listing.get("url", "")
+    source     = listing.get("source", "")
+    address    = listing.get("address") or listing.get("title") or "Listing"
+    hood       = listing.get("neighborhood") or ""
+    price      = listing.get("price")
+    beds       = listing.get("bedrooms")
+    baths      = listing.get("bathrooms")
+    floor_     = listing.get("floor")
+    subway     = listing.get("subway_lines") or listing.get("nearest_subway") or ""
+    image_url  = listing.get("image_url")
+    is_priority = listing.get("is_priority", False)
+    score      = listing.get("priority_score")
+    rent_stab  = listing.get("rent_stabilized")
+    dishwasher = listing.get("dishwasher")
+    wd         = listing.get("washer_dryer")
+    user_status = listing.get("user_status")
+    date_listed = (listing.get("date_listed") or "")[:10]
+    # Default to "Available": the app only renders active (non-delisted) listings,
+    # so one with no known badge is available by definition. Real statuses (e.g.
+    # "Temporarily off market") override as the scraper backfills them.
+    status_fmt  = _fmt_listing_status(listing.get("listing_status")) or "Available"
+
+    with st.container(border=True):
+        # ── Top row: details (left) + map (right) ───────────────────────
+        top_left, top_right = st.columns(2)
+
+        with top_left:
+            priority_prefix = "★ " if is_priority else ""
+            st.markdown(f"#### {priority_prefix}{address}")
+            meta_parts = [_source_label(source)]
+            if hood:
+                meta_parts.append(hood)
+            if score is not None:
+                meta_parts.append(f"score: {score:.0f}")
+            st.caption("  ·  ".join(meta_parts))
+
+            st.markdown(
+                f'<p style="font-size:1.4rem;font-weight:700;margin:4px 0">'
+                f'{_fmt_price(price)}</p>',
+                unsafe_allow_html=True,
+            )
+
+            detail_parts = [_fmt_beds_baths_floor(beds, baths, floor_)]
+            date_fmt = _fmt_date_listed(date_listed)
+            if date_fmt:
+                detail_parts.append(f"Listed {date_fmt}")
+            if status_fmt:
+                detail_parts.append(status_fmt)
+            detail_line = "  ·  ".join(p for p in detail_parts if p)
+            if detail_line:
+                st.markdown(detail_line)
+            if subway:
+                st.markdown(f"🚇 {subway}")
+
+            badges = []
+            if is_priority:
+                badges.append(_badge("★ Priority", "#8B0000"))
+            if rent_stab:
+                badges.append(_badge("Rent stabilized", "#5c4a00"))
+            if dishwasher:
+                badges.append(_badge("Dishwasher", "#1a5c33"))
+            if wd:
+                badges.append(_badge("W/D in unit", "#1a3a6b"))
+            if user_status == "saved":
+                badges.append(_badge("★ Saved", "#3a3a8b"))
+            if badges:
+                st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
+
+        with top_right:
+            # Coordinates are geocoded by the scraper and stored on the listing
+            # (Supabase), so the map renders with no geocoding at render time.
+            _lat, _lon = listing.get("latitude"), listing.get("longitude")
+            if _lat is not None and _lon is not None:
+                _components.html(_listing_map_html(float(_lat), float(_lon)), height=300)
+            else:
+                st.caption("📍 No location available to map.")
+
+        # ── Bottom row: image carousel (full width) ──────────────────────
+        images = [u.strip() for u in (image_url or "").split(",") if u.strip()]
+        _image_carousel(images, key=listing.get("listing_id") or url[-12:])
+
+        # ── Actions ──────────────────────────────────────────────────────
+        st.markdown("")
+        act_link, act_save, act_skip, act_undo = st.columns([2, 1, 1, 1])
+
+        with act_link:
+            st.link_button(f"View on {_source_label(source)} ↗", url, use_container_width=True)
+
+        with act_save:
+            if user_status == "saved":
+                if st.button("★ Saved", key=f"save_{url}", type="primary",
+                             use_container_width=True, help="Click to unsave"):
+                    _set_status(url, None)
+                    st.rerun()
+            else:
+                if st.button("☆ Save", key=f"save_{url}",
+                             use_container_width=True):
+                    _set_status(url, "saved")
+                    st.rerun()
+
+        with act_skip:
+            if user_status == "skipped":
+                # Skipped listings only show in "All active" view
+                if st.button("✕ Skipped", key=f"skip_{url}",
+                             use_container_width=True, help="Click to restore"):
+                    _set_status(url, None)
+                    st.rerun()
+            else:
+                if st.button("✕ Skip", key=f"skip_{url}",
+                             use_container_width=True):
+                    _set_status(url, "skipped")
+                    st.rerun()
+
+        # Empty column for spacing
+        with act_undo:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Map view — all filtered listings on one map (then stop; skip the list UI)
 # ---------------------------------------------------------------------------
 
 if view == "Map":
     st.markdown(f"### 🗺️ {len(filtered)} listing(s) on the map")
     st.caption(
-        "Hover a marker for price & date listed; click one to open its photos and "
-        "save/skip below the map. Red = priority, green = saved, blue = other. "
+        "Hover a star for a photo & details; click one to open the full listing "
+        "below the map. Red = priority, green = saved, blue = other. "
         "Use the sidebar filters to narrow the set."
     )
 
@@ -857,10 +990,6 @@ if view == "Map":
         key="all_map",
     )
 
-    # TEMP DEBUG — remove once confirmed working.
-    with st.expander("🔧 map click debug", expanded=True):
-        st.write(_map_state)
-
     # ── Selected-listing card (below the map, like a normal list card) ──────────
     # st_folium returns the clicked CircleMarker's exact center, so match to the
     # listing at (essentially) that point. A tight threshold means clicks on a
@@ -878,44 +1007,7 @@ if view == "Map":
         st.caption("👆 Click a marker to open the listing here.")
         st.stop()
 
-    s_url    = _selected.get("url", "")
-    s_addr   = _selected.get("address") or _selected.get("title") or "Listing"
-    s_status = _selected.get("user_status")
-    s_imgs   = [u.strip() for u in (_selected.get("image_url") or "").split(",") if u.strip()]
-    with st.container(border=True):
-        st.markdown(f"#### {('★ ' if _selected.get('is_priority') else '')}{s_addr}")
-        meta = [_source_label(_selected.get("source", "")), _fmt_price(_selected.get("price"))]
-        _dl = _fmt_date_listed((_selected.get("date_listed") or "")[:10])
-        if _selected.get("neighborhood"):
-            meta.insert(1, _selected["neighborhood"])
-        if _dl:
-            meta.append(f"Listed {_dl}")
-        st.caption("  ·  ".join(meta))
-
-        _image_carousel(s_imgs, key="map_" + (_selected.get("listing_id") or s_url[-12:]))
-
-        b_link, b_save, b_skip, b_undo = st.columns([2, 1, 1, 1])
-        with b_link:
-            st.link_button(f"View on {_source_label(_selected.get('source',''))} ↗",
-                           s_url, use_container_width=True)
-        with b_save:
-            if st.button("★ Saved" if s_status == "saved" else "Save",
-                         key=f"map_save_{s_url}",
-                         type="primary" if s_status == "saved" else "secondary",
-                         use_container_width=True):
-                _set_status(s_url, "saved")
-                st.rerun()
-        with b_skip:
-            if st.button("Skipped" if s_status == "skipped" else "Skip",
-                         key=f"map_skip_{s_url}", use_container_width=True):
-                _set_status(s_url, "skipped")
-                st.rerun()
-        with b_undo:
-            if st.button("Undo", key=f"map_undo_{s_url}",
-                         use_container_width=True, disabled=s_status is None):
-                _set_status(s_url, None)
-                st.rerun()
-
+    _render_listing_card(_selected)
     st.stop()
 
 
@@ -944,125 +1036,7 @@ if not filtered:
     st.info("No listings match the current filters.")
 else:
     for listing in visible_listings:
-        url        = listing.get("url", "")
-        source     = listing.get("source", "")
-        address    = listing.get("address") or listing.get("title") or "Listing"
-        hood       = listing.get("neighborhood") or ""
-        price      = listing.get("price")
-        beds       = listing.get("bedrooms")
-        baths      = listing.get("bathrooms")
-        floor_     = listing.get("floor")
-        subway     = listing.get("subway_lines") or listing.get("nearest_subway") or ""
-        image_url  = listing.get("image_url")
-        is_priority = listing.get("is_priority", False)
-        score      = listing.get("priority_score")
-        rent_stab  = listing.get("rent_stabilized")
-        dishwasher = listing.get("dishwasher")
-        wd         = listing.get("washer_dryer")
-        user_status = listing.get("user_status")
-        date_listed = (listing.get("date_listed") or "")[:10]
-        # Default to "Available": the app only renders active (non-delisted)
-        # listings, so one with no known badge is available by definition.
-        # Real statuses (e.g. "Temporarily off market") override the default as
-        # the scraper backfills them. (Craigslist has no badge → always Available.)
-        status_fmt  = _fmt_listing_status(listing.get("listing_status")) or "Available"
-
-        with st.container(border=True):
-            # ── Top row: details (left) + map (right) ───────────────────────
-            top_left, top_right = st.columns(2)
-
-            with top_left:
-                priority_prefix = "★ " if is_priority else ""
-                st.markdown(f"#### {priority_prefix}{address}")
-                meta_parts = [_source_label(source)]
-                if hood:
-                    meta_parts.append(hood)
-                if score is not None:
-                    meta_parts.append(f"score: {score:.0f}")
-                st.caption("  ·  ".join(meta_parts))
-
-                st.markdown(
-                    f'<p style="font-size:1.4rem;font-weight:700;margin:4px 0">'
-                    f'{_fmt_price(price)}</p>',
-                    unsafe_allow_html=True,
-                )
-
-                detail_parts = [_fmt_beds_baths_floor(beds, baths, floor_)]
-                date_fmt = _fmt_date_listed(date_listed)
-                if date_fmt:
-                    detail_parts.append(f"Listed {date_fmt}")
-                if status_fmt:
-                    detail_parts.append(status_fmt)
-                detail_line = "  ·  ".join(p for p in detail_parts if p)
-                if detail_line:
-                    st.markdown(detail_line)
-                if subway:
-                    st.markdown(f"🚇 {subway}")
-
-                badges = []
-                if is_priority:
-                    badges.append(_badge("★ Priority", "#8B0000"))
-                if rent_stab:
-                    badges.append(_badge("Rent stabilized", "#5c4a00"))
-                if dishwasher:
-                    badges.append(_badge("Dishwasher", "#1a5c33"))
-                if wd:
-                    badges.append(_badge("W/D in unit", "#1a3a6b"))
-                if user_status == "saved":
-                    badges.append(_badge("★ Saved", "#3a3a8b"))
-                if badges:
-                    st.markdown("&nbsp;" + " ".join(badges), unsafe_allow_html=True)
-
-            with top_right:
-                # Coordinates are geocoded by the scraper and stored on the listing
-                # (Supabase), so the map renders with no geocoding at render time.
-                # Static HTML (cached per coordinate) rather than st_folium — display
-                # only, no per-rerun component handshake.
-                _lat, _lon = listing.get("latitude"), listing.get("longitude")
-                if _lat is not None and _lon is not None:
-                    _components.html(_listing_map_html(float(_lat), float(_lon)), height=300)
-                else:
-                    st.caption("📍 No location available to map.")
-
-            # ── Bottom row: image carousel (full width) ──────────────────────
-            images = [u.strip() for u in (image_url or "").split(",") if u.strip()]
-            _image_carousel(images, key=listing.get("listing_id") or url[-12:])
-
-            # ── Actions ──────────────────────────────────────────────────────
-            st.markdown("")
-            act_link, act_save, act_skip, act_undo = st.columns([2, 1, 1, 1])
-
-            with act_link:
-                st.link_button(f"View on {_source_label(source)} ↗", url, use_container_width=True)
-
-            with act_save:
-                if user_status == "saved":
-                    if st.button("★ Saved", key=f"save_{url}", type="primary",
-                                 use_container_width=True, help="Click to unsave"):
-                        _set_status(url, None)
-                        st.rerun()
-                else:
-                    if st.button("☆ Save", key=f"save_{url}",
-                                 use_container_width=True):
-                        _set_status(url, "saved")
-                        st.rerun()
-
-            with act_skip:
-                if user_status == "skipped":
-                    # Skipped listings only show in "All active" view
-                    if st.button("✕ Skipped", key=f"skip_{url}",
-                                 use_container_width=True, help="Click to restore"):
-                        _set_status(url, None)
-                        st.rerun()
-                else:
-                    if st.button("✕ Skip", key=f"skip_{url}",
-                                 use_container_width=True):
-                        _set_status(url, "skipped")
-                        st.rerun()
-
-            # Empty column for spacing
-            with act_undo:
-                pass
+        _render_listing_card(listing)
 
     # Load more
     if _visible_count < len(filtered):
