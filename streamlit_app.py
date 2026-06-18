@@ -304,20 +304,13 @@ def _build_all_map(signature: tuple) -> folium.Map:
         price_s = _fmt_price(price)
         date_s  = _fmt_date_listed((date_listed or "")[:10])
 
+        # Hover tooltip only — no in-map popup. The full listing detail is shown in
+        # the card below the map; an open Leaflet popup can also swallow the click
+        # so st_folium never reports last_object_clicked.
         tip = price_s + (f" · listed {date_s}" if date_s else "")
-        popup_html = (
-            '<div style="font-size:0.85rem;width:180px">'
-            + (f'<img src="{cover}" style="width:100%;height:118px;object-fit:cover;'
-               f'border-radius:4px;margin-bottom:5px"/>' if cover else "")
-            + f'<b>{price_s}</b><br>'
-            + (f'Listed {date_s}<br>' if date_s else "")
-            + (f'{hood}' if hood else "")
-            + '</div>'
-        )
         folium.Marker(
             location=[lat, lon],
             tooltip=tip,
-            popup=folium.Popup(popup_html, max_width=220),
             icon=folium.Icon(color=_pin_color(is_priority, status),
                              icon="star", prefix="fa", icon_color="white"),
         ).add_to(m)
@@ -857,9 +850,12 @@ if view == "Map":
         _build_all_map(_sig),
         use_container_width=True,
         height=640,
-        returned_objects=["last_object_clicked"],
         key="all_map",
     )
+
+    # TEMP DEBUG — remove once confirmed working.
+    with st.expander("🔧 map click debug", expanded=True):
+        st.write(_map_state)
 
     # ── Selected-listing card (below the map, like a normal list card) ──────────
     # st_folium returns the clicked CircleMarker's exact center, so match to the
