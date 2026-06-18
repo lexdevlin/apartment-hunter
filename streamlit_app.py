@@ -255,10 +255,15 @@ _PIN_DEFAULT  = "#1e78dc"   # blue
 
 
 def _pin_icon(color: str) -> folium.DivIcon:
-    """A small colored star marker for a listing."""
+    """A small colored star marker for a listing.
+
+    Purely decorative: `pointer-events:none` lets clicks fall through to the
+    CircleMarker hit-target beneath it (st_folium reports CircleMarker clicks but
+    NOT custom DivIcon-marker clicks)."""
     return folium.DivIcon(
         html=(
             f'<div style="font-size:21px;color:{color};line-height:1;'
+            f'pointer-events:none;'
             f'text-shadow:0 1px 2px rgba(0,0,0,0.6),0 0 2px #fff">★</div>'
         ),
         icon_size=(21, 21),
@@ -285,6 +290,12 @@ def _build_all_map(signature: tuple) -> folium.Map:
         center = [40.68, -73.94]
 
     m = folium.Map(location=center, zoom_start=13, tiles="CartoDB positron")
+
+    # Make all DivIcon markers (the decorative stars) click-through, so a click on
+    # a star reaches the CircleMarker hit-target in the SVG pane beneath it.
+    m.get_root().header.add_child(folium.Element(
+        "<style>.leaflet-marker-icon{pointer-events:none;}</style>"
+    ))
 
     # Subway stations — small colored circles, drawn first so listings sit on top.
     for s in _load_stations():
@@ -322,10 +333,22 @@ def _build_all_map(signature: tuple) -> folium.Map:
             + (f'{hood}' if hood else "")
             + '</div>'
         )
-        folium.Marker(
+        # Transparent CircleMarker = the actual click/hover target (st_folium
+        # reports CircleMarker clicks via last_object_clicked); the star on top is
+        # decorative only (pointer-events:none).
+        folium.CircleMarker(
             location=[lat, lon],
+            radius=12,
+            color=color,
+            weight=0,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.01,
             tooltip=tip,
             popup=folium.Popup(popup_html, max_width=220),
+        ).add_to(m)
+        folium.Marker(
+            location=[lat, lon],
             icon=_pin_icon(color),
         ).add_to(m)
 
@@ -868,19 +891,16 @@ if view == "Map":
         key="all_map",
     )
 
-    # TEMP DEBUG — remove once click handling is confirmed.
-    with st.expander("🔧 map click debug", expanded=True):
-        st.write(_map_state)
-
     # ── Selected-listing card (below the map, like a normal list card) ──────────
-    # Match the clicked marker to the nearest listing (robust to float drift);
-    # clicks on subway circles fall outside the threshold and select nothing.
+    # st_folium returns the clicked CircleMarker's exact center, so match to the
+    # listing at (essentially) that point. A tight threshold means clicks on a
+    # subway circle resolve to no listing.
     _clicked = (_map_state or {}).get("last_object_clicked") or {}
     _selected = None
     _cl, _cn = _clicked.get("lat"), _clicked.get("lng")
     if _cl is not None and _cn is not None and _listing_pts:
         _best = min(_listing_pts, key=lambda p: (p[0] - _cl) ** 2 + (p[1] - _cn) ** 2)
-        if (_best[0] - _cl) ** 2 + (_best[1] - _cn) ** 2 <= 0.0006 ** 2:
+        if (_best[0] - _cl) ** 2 + (_best[1] - _cn) ** 2 <= 0.0001 ** 2:
             _selected = _best[2]
 
     st.divider()
