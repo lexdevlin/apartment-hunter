@@ -22,7 +22,6 @@ from pathlib import Path
 import folium
 from streamlit_folium import st_folium
 import streamlit.components.v1 as _components
-import pandas as pd
 import streamlit as st
 from supabase import create_client, Client
 
