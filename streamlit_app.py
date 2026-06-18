@@ -850,6 +850,11 @@ if view == "Map":
         _build_all_map(_sig),
         use_container_width=True,
         height=640,
+        # Restrict the returned payload — returning the full map state for a
+        # ~500-marker map makes each round-trip take minutes. These are the only
+        # fields we read.
+        returned_objects=["last_object_clicked", "last_object_clicked_tooltip",
+                          "last_clicked"],
         key="all_map",
     )
 
