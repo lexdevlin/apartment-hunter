@@ -189,7 +189,7 @@ def _listing_map(lat: float, lon: float) -> folium.Map:
     m = folium.Map(
         location=[lat, lon],
         zoom_start=15,
-        tiles="CartoDB positron",
+        tiles="CartoDB Voyager",
         scrollWheelZoom=False,
     )
 
@@ -275,7 +275,7 @@ def _build_all_map(signature: tuple) -> folium.Map:
     else:
         center = [40.68, -73.94]
 
-    m = folium.Map(location=center, zoom_start=13, tiles="CartoDB positron")
+    m = folium.Map(location=center, zoom_start=13, tiles="CartoDB Voyager")
 
     # Subway stations — small colored circles, drawn first so listings sit on top.
     for s in _load_stations():
