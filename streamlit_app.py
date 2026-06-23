@@ -1007,6 +1007,7 @@ if view == "Map":
     if st.session_state.get("_map_frame_key") != _frame_key:
         st.session_state["_map_frame_key"] = _frame_key
         st.session_state.pop("_map_focus", None)
+        st.session_state.pop("_map_selected_url", None)
 
     _map_state = st_folium(
         _build_all_map(_sig, focus=st.session_state.get("_map_focus")),
@@ -1019,17 +1020,25 @@ if view == "Map":
     )
 
     # ── Selected-listing card (below the map, like a normal list card) ──────────
-    _selected = _listing_at_click((_map_state or {}).get("last_object_clicked") or {},
-                                  _listing_pts)
+    # A fresh marker click updates the remembered selection + centres the map on it
+    # (one deterministic rerun; can't loop). We render the card from the remembered
+    # selection (by URL), NOT from the live click: rebuilding the map at the new
+    # focus resets st_folium's last_object_clicked, so reading it directly would
+    # drop the card on the recenter run.
+    _clicked = _listing_at_click((_map_state or {}).get("last_object_clicked") or {},
+                                 _listing_pts)
+    if _clicked is not None and \
+            _clicked.get("url") != st.session_state.get("_map_selected_url"):
+        st.session_state["_map_selected_url"] = _clicked.get("url")
+        st.session_state["_map_focus"] = (float(_clicked["latitude"]),
+                                          float(_clicked["longitude"]))
+        st.rerun()
 
-    # Centre the map on the clicked listing on the next run. Deterministic (driven
-    # by the discrete click, not the live view), so it converges in one rerun and
-    # can't loop. Save/Skip keeps the same focus, so the view stays put.
-    if _selected is not None:
-        _focus = (float(_selected["latitude"]), float(_selected["longitude"]))
-        if _focus != st.session_state.get("_map_focus"):
-            st.session_state["_map_focus"] = _focus
-            st.rerun()
+    _selected = next(
+        (l for l in filtered
+         if l.get("url") == st.session_state.get("_map_selected_url")),
+        None,
+    )
 
     st.divider()
     if not _selected:
