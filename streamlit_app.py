@@ -260,24 +260,42 @@ def _pin_color(is_priority: bool, status: "str | None") -> str:
     return "blue"
 
 
-def _build_all_map(signature: tuple) -> folium.Map:
+def _listing_at_click(clicked: dict, listing_pts: list) -> "dict | None":
+    """Resolve an st_folium `last_object_clicked` ({lat,lng}) to the nearest listing
+    within ~11m, so clicks on subway circles (or empty map) resolve to nothing."""
+    cl, cn = clicked.get("lat"), clicked.get("lng")
+    if cl is None or cn is None or not listing_pts:
+        return None
+    best = min(listing_pts, key=lambda p: (p[0] - cl) ** 2 + (p[1] - cn) ** 2)
+    if (best[0] - cl) ** 2 + (best[1] - cn) ** 2 <= 0.0001 ** 2:
+        return best[2]
+    return None
+
+
+def _build_all_map(signature: tuple, focus=None) -> folium.Map:
     """Build one Folium map with every filtered listing plus the full subway network.
 
     Built fresh on every run (NOT cached): st_folium fails to report clicks
     (last_object_clicked / last_clicked stay null) when handed a reused/cached
     folium.Map instance. `_load_stations()` is still cached, so the per-run cost
     is just iterating the in-memory station list + listings.
+
+    `focus` (lat, lon): when given, centre the map there at a fixed zoom and skip
+    fit_bounds — used to zoom to a clicked listing. When None, fit all listings.
     """
     coords = [(lat, lon) for (_u, lat, lon, *_rest) in signature
               if lat is not None and lon is not None]
 
-    if coords:
-        center = [sum(c[0] for c in coords) / len(coords),
-                  sum(c[1] for c in coords) / len(coords)]
+    if focus is not None:
+        m = folium.Map(location=[focus[0], focus[1]], zoom_start=15,
+                       tiles="CartoDB Voyager")
     else:
-        center = [40.68, -73.94]
-
-    m = folium.Map(location=center, zoom_start=13, tiles="CartoDB Voyager")
+        if coords:
+            center = [sum(c[0] for c in coords) / len(coords),
+                      sum(c[1] for c in coords) / len(coords)]
+        else:
+            center = [40.68, -73.94]
+        m = folium.Map(location=center, zoom_start=13, tiles="CartoDB Voyager")
 
     # Subway stations — small colored circles, drawn first so listings sit on top.
     for s in _load_stations():
@@ -324,8 +342,9 @@ def _build_all_map(signature: tuple) -> folium.Map:
         ).add_to(m)
 
     # Fit the viewport to the listings (ignore stations so it doesn't zoom out to
-    # the whole network when listings cluster in a few neighborhoods).
-    if len(coords) > 1:
+    # the whole network when listings cluster in a few neighborhoods). Skipped when
+    # focusing on a clicked listing — fit_bounds would override the focus zoom.
+    if focus is None and len(coords) > 1:
         lats = [c[0] for c in coords]
         lons = [c[1] for c in coords]
         m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]],
@@ -978,51 +997,39 @@ if view == "Map":
     # ── The map ─────────────────────────────────────────────────────────────────
     # Rendered first so the selected-listing card appears *below* it.
     #
-    # The map is rebuilt fresh each run (required so st_folium reports clicks), so
-    # its fit_bounds would otherwise snap the view back on every click. To hold the
-    # view: capture st_folium's reported center/zoom and feed them back in. Reset
-    # that saved view when the *set* of listings changes (keyed on URLs, so a
-    # Save/Skip — which changes status but not the set — doesn't reframe).
+    # View behaviour: by default the map fits all listings. When you click a star,
+    # we rebuild the map centred on THAT listing at a fixed zoom (a "focus"). The
+    # focus is driven only by discrete clicks — we never read the live center/zoom
+    # back — so there's no fit_bounds-vs-restored-view feedback loop. The focus is
+    # cleared when the listing set changes (keyed on URLs, so Save/Skip — which
+    # changes status but not the set — keeps you zoomed on the listing).
     _frame_key = hash(tuple(sorted(l.get("url", "") for l in filtered)))
     if st.session_state.get("_map_frame_key") != _frame_key:
         st.session_state["_map_frame_key"] = _frame_key
-        st.session_state.pop("_map_center", None)
-        st.session_state.pop("_map_zoom", None)
+        st.session_state.pop("_map_focus", None)
 
     _map_state = st_folium(
-        _build_all_map(_sig),
+        _build_all_map(_sig, focus=st.session_state.get("_map_focus")),
         use_container_width=True,
         height=640,
-        center=st.session_state.get("_map_center"),
-        zoom=st.session_state.get("_map_zoom"),
-        # Keep the returned payload small — returning the full state for a
-        # ~500-marker map makes each round-trip take minutes. center/zoom let us
-        # persist the view; last_object_clicked resolves the selected listing.
-        returned_objects=["last_object_clicked", "center", "zoom"],
+        # Keep the returned payload tiny — returning the full state for a
+        # ~500-marker map makes each round-trip take minutes. We only need clicks.
+        returned_objects=["last_object_clicked"],
         key="all_map",
     )
 
-    # Remember the current view so the next rerun (e.g. a star click) holds it.
-    _ms = _map_state or {}
-    _ctr = _ms.get("center")
-    if isinstance(_ctr, dict) and _ctr.get("lat") is not None:
-        st.session_state["_map_center"] = [_ctr["lat"], _ctr["lng"]]
-    elif isinstance(_ctr, (list, tuple)) and len(_ctr) == 2:
-        st.session_state["_map_center"] = [_ctr[0], _ctr[1]]
-    if _ms.get("zoom") is not None:
-        st.session_state["_map_zoom"] = _ms["zoom"]
-
     # ── Selected-listing card (below the map, like a normal list card) ──────────
-    # st_folium returns the clicked CircleMarker's exact center, so match to the
-    # listing at (essentially) that point. A tight threshold means clicks on a
-    # subway circle resolve to no listing.
-    _clicked = (_map_state or {}).get("last_object_clicked") or {}
-    _selected = None
-    _cl, _cn = _clicked.get("lat"), _clicked.get("lng")
-    if _cl is not None and _cn is not None and _listing_pts:
-        _best = min(_listing_pts, key=lambda p: (p[0] - _cl) ** 2 + (p[1] - _cn) ** 2)
-        if (_best[0] - _cl) ** 2 + (_best[1] - _cn) ** 2 <= 0.0001 ** 2:
-            _selected = _best[2]
+    _selected = _listing_at_click((_map_state or {}).get("last_object_clicked") or {},
+                                  _listing_pts)
+
+    # Centre the map on the clicked listing on the next run. Deterministic (driven
+    # by the discrete click, not the live view), so it converges in one rerun and
+    # can't loop. Save/Skip keeps the same focus, so the view stays put.
+    if _selected is not None:
+        _focus = (float(_selected["latitude"]), float(_selected["longitude"]))
+        if _focus != st.session_state.get("_map_focus"):
+            st.session_state["_map_focus"] = _focus
+            st.rerun()
 
     st.divider()
     if not _selected:
