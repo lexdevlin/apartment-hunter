@@ -435,6 +435,13 @@ st.sidebar.title("🏠 Apartment Hunter")
 view = st.sidebar.radio("View", ["List", "Map"], index=0, horizontal=True)
 st.sidebar.markdown("---")
 
+search_query = st.sidebar.text_input(
+    "🔍 Search",
+    placeholder="Address, title, or neighborhood…",
+    help="Matches address, title, and neighborhood. Respects the filters below — "
+         "switch to 'All active' to search everything.",
+).strip()
+
 status_view = st.sidebar.radio(
     "Show listings",
     ["Unreviewed", "Saved", "Saved & Unreviewed", "Skipped", "All active"],
@@ -493,10 +500,21 @@ st.sidebar.caption(
 # Filtering
 # ---------------------------------------------------------------------------
 
+def _matches_search(listing: dict, query: str) -> bool:
+    """Case-insensitive match of every whitespace-separated term in `query`
+    against the listing's address, title, and neighborhood (AND semantics)."""
+    haystack = " ".join(
+        str(listing.get(f) or "") for f in ("address", "title", "neighborhood")
+    ).lower()
+    return all(term in haystack for term in query.lower().split())
+
+
 def _apply_filters(listings: list[dict]) -> list[dict]:
     out = []
     for l in listings:
         if l.get("delisted"):
+            continue
+        if search_query and not _matches_search(l, search_query):
             continue
         status = l.get("user_status")
         if status_view == "Unreviewed" and status is not None:
@@ -1058,7 +1076,7 @@ _PAGE_SIZE = 10
 # Reset to page 1 whenever any filter or sort changes
 _filter_key = (status_view, priority_only, sort_by,
                tuple(selected_sources), tuple(selected_hoods),
-               filter_rent_stab, filter_dishwasher, filter_wd)
+               filter_rent_stab, filter_dishwasher, filter_wd, search_query)
 if st.session_state.get("_filter_key") != _filter_key:
     st.session_state["_filter_key"] = _filter_key
     st.session_state["_page"] = 1
